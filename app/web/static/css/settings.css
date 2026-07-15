@@ -1,0 +1,808 @@
+/* =====================================================
+   BASE LAYOUT
+===================================================== */
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #eef2f7;
+}
+
+.container {
+    width: min(96%, 1500px);
+    margin: 0 auto;
+    padding: 14px 18px 24px;
+    box-sizing: border-box;
+}
+
+.card {
+    margin-bottom: 16px;
+    padding: 18px;
+
+    box-sizing: border-box;
+
+    border-radius: 14px;
+
+    background: #ffffff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.card h2 {
+    margin: 0 0 12px;
+    font-size: 22px;
+}
+
+.hint {
+    margin-bottom: 10px;
+    padding: 9px 12px;
+
+    border: 1px solid #bfdbfe;
+    border-radius: 9px;
+
+    background: #eff6ff;
+    color: #1e3a8a;
+
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.danger-box {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+
+    border: 1px solid #fecaca;
+    border-radius: 9px;
+
+    background: #fef2f2;
+    color: #7f1d1d;
+}
+
+
+/* =====================================================
+   RESET CONFIGURATION
+===================================================== */
+
+.reset-card {
+    margin-bottom: 14px;
+    padding: 12px 18px;
+}
+
+.reset-card-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.reset-card h2 {
+    margin: 0;
+    font-size: 21px;
+}
+
+.reset-card #resetAllBtn {
+    flex-shrink: 0;
+    margin: 0;
+    padding: 10px 18px;
+}
+
+
+/* =====================================================
+   COMMON IMAGE AND CANVAS
+===================================================== */
+
+.image-container {
+    position: relative;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 100%;
+    max-width: 100%;
+
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+/*
+ภาพต้องไม่ถูกยืดเต็มกล่อง
+ขนาด element ของรูปต้องตรงกับภาพที่มองเห็นจริง
+เพื่อให้พิกัด Mouse, Canvas และ Crop ตรงกัน
+*/
+
+#hmiImage,
+#roiImage,
+#calibratedPreview {
+    display: block;
+
+    width: auto;
+    height: auto;
+
+    max-width: 100%;
+    max-height: 100%;
+
+    flex: 0 0 auto;
+
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+#hmiImage,
+#roiImage {
+    cursor: crosshair;
+}
+
+/*
+JavaScript จะกำหนด:
+- canvas.width
+- canvas.height
+- style.width
+- style.height
+- style.left
+- style.top
+
+ดังนั้นห้ามกำหนด width: 100% หรือ height: 100% ให้ Canvas
+*/
+
+#drawCanvas,
+#roiCanvas {
+    position: absolute;
+
+    display: block;
+
+    width: auto;
+    height: auto;
+
+    pointer-events: none;
+}
+
+
+/* =====================================================
+   BUTTONS
+===================================================== */
+
+button {
+    margin-top: 14px;
+    margin-right: 8px;
+    padding: 10px 17px;
+
+    border: none;
+    border-radius: 8px;
+
+    color: #ffffff;
+    font-size: 14px;
+
+    cursor: pointer;
+}
+
+button:disabled {
+    background: #9ca3af !important;
+    cursor: not-allowed;
+}
+
+.button-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.button-row button {
+    margin: 0;
+    padding: 9px 16px;
+    font-size: 14px;
+}
+
+#saveBtn {
+    background: #2563eb;
+}
+
+#resetBtn {
+    background: #dc2626;
+}
+
+#resetAllBtn {
+    background: #991b1b;
+}
+
+#drawRoiBtn {
+    background: #7c3aed;
+}
+
+#drawRoiBtn.active {
+    background: #6b7280;
+    box-shadow: 0 0 0 4px rgba(107, 114, 128, 0.25);
+}
+
+#saveAllBtn {
+    background: #16a34a;
+}
+
+.delete-btn {
+    margin: 0;
+    padding: 8px 12px;
+
+    background: #dc2626;
+}
+
+
+/* =====================================================
+   CALIBRATION
+===================================================== */
+
+.calibration-layout {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    gap: 18px;
+    align-items: stretch;
+}
+
+.calibration-card {
+    display: flex;
+    flex-direction: column;
+
+    min-width: 0;
+    padding: 16px 18px;
+
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.calibration-card h2 {
+    margin: 0 0 11px;
+    font-size: 21px;
+}
+
+.calibration-input-card .hint {
+    margin-bottom: 10px;
+}
+
+.calibration-image-container,
+.result-image-container {
+    position: relative;
+
+    width: 100%;
+    height: auto;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    box-sizing: border-box;
+    overflow: hidden;
+
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+
+    background: #eef1f5;
+}
+
+/*
+ภาพ Calibration ด้านซ้ายต้องรักษาสัดส่วนเดิม
+Element ของรูปต้องเท่ากับภาพที่แสดงจริง
+*/
+
+.calibration-image-container #hmiImage {
+    display: block;
+
+    width: 100%;
+    height: auto;
+
+    max-width: none;
+    max-height: none;
+
+    border: 0;
+    border-radius: 0;
+}
+
+/*
+ภาพผลลัพธ์ไม่ต้องมี Canvas
+ใช้ contain ได้เพื่อให้เห็นภาพครบ
+*/
+
+.result-image-container #calibratedPreview {
+    display: block;
+
+    width: 100%;
+    height: auto;
+
+    max-width: none;
+    max-height: none;
+
+    border: 0;
+    border-radius: 0;
+}
+
+.image-path-row {
+    margin: 8px 0;
+
+    overflow: hidden;
+
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.points {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    gap: 8px;
+    margin-top: 0;
+}
+
+.point-box {
+    padding: 8px 10px;
+
+    overflow: hidden;
+
+    border-radius: 7px;
+
+    background: #f9fafb;
+
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.calibration-status {
+    min-height: 20px;
+    margin: 0 0 8px;
+
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.calibration-ready {
+    color: #16a34a;
+}
+
+.calibration-not-ready {
+    color: #dc2626;
+}
+
+.result-placeholder {
+    width: 100%;
+    min-height: 300px;
+    height: auto;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 20px;
+    box-sizing: border-box;
+
+    border: 1px solid #d1d5db;
+    border-radius: 10px;
+
+    background: #eef1f5;
+    color: #6b7280;
+
+    text-align: center;
+}
+
+
+/* =====================================================
+   MANUAL ROI SETUP
+===================================================== */
+
+.roi-card{
+    padding:16px 18px;
+}
+
+.roi-card h2{
+    margin-bottom:10px;
+}
+
+.roi-toolbar{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:12px;
+    align-items:stretch;
+}
+
+.roi-hint{
+    display:flex;
+    align-items:center;
+    margin:0;
+}
+
+.roi-toolbar #drawRoiBtn{
+    min-width:140px;
+    margin:0;
+    white-space:nowrap;
+}
+
+.roi-status-box{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin:10px 0 12px;
+    padding:10px 12px;
+}
+
+.status-divider{
+    color:#9ca3af;
+}
+
+.setup-layout {
+    display: grid;
+
+    grid-template-columns: 56% 44%;
+
+    gap: 16px;
+    align-items: start;
+}
+
+.roi-image-panel,
+.roi-queue-panel{
+    min-width:0;
+}
+
+/* ================= IMAGE ================= */
+
+.roi-image-container{
+
+    position:relative;
+
+    width:100%;
+    height:clamp(420px,58vh,620px);
+
+    display:flex;
+    justify-content:center;
+    align-items:center;
+
+    overflow:hidden;
+
+    border:1px solid #d1d5db;
+    border-radius:10px;
+
+    background:#eef1f5;
+}
+
+.roi-image-container #roiImage{
+
+    width:auto;
+    height:auto;
+
+    max-width:100%;
+    max-height:100%;
+
+    object-fit:initial;
+
+    flex:0 0 auto;
+
+    border:0;
+    border-radius:0;
+}
+
+/* ================= QUEUE ================= */
+
+.roi-queue-panel{
+
+    display:flex;
+    flex-direction:column;
+
+    min-width:0;
+
+    height:clamp(420px,58vh,620px);
+}
+
+.roi-queue-panel h3{
+    margin:0 0 10px;
+}
+
+.roi-table-wrapper{
+
+    flex:1;
+
+    width:100%;
+
+    overflow:auto;
+
+    border:1px solid #e5e7eb;
+    border-radius:8px;
+}
+
+/* ไม่บังคับ 620px แล้ว */
+.roi-table-wrapper table{
+
+    width:100%;
+
+    min-width:unset;
+
+    table-layout:fixed;
+}
+
+.roi-table-wrapper thead th{
+
+    position:sticky;
+    top:0;
+
+    z-index:2;
+}
+
+.roi-queue-panel #saveAllBtn{
+
+    align-self:flex-start;
+
+    margin-top:12px;
+}
+
+/* =====================================================
+   TABLE
+===================================================== */
+
+.table-wrapper{
+
+    width:100%;
+
+    overflow-x:auto;
+}
+
+table{
+
+    width:100%;
+
+    border-collapse:collapse;
+}
+
+th{
+
+    padding:10px 8px;
+
+    background:#111827;
+
+    color:white;
+
+    white-space:nowrap;
+}
+
+td{
+
+    padding:8px;
+
+    border-bottom:1px solid #e5e7eb;
+
+    text-align:center;
+    vertical-align:middle;
+
+    overflow:hidden;
+}
+
+/* กำหนดความกว้างแต่ละคอลัมน์ */
+
+#roiTable th:nth-child(1),
+#roiTable td:nth-child(1){
+    width:90px;
+}
+
+#roiTable th:nth-child(2),
+#roiTable td:nth-child(2){
+    width:90px;
+}
+
+#roiTable th:nth-child(3),
+#roiTable td:nth-child(3){
+    width:170px;
+}
+
+#roiTable th:nth-child(4),
+#roiTable td:nth-child(4){
+    width:120px;
+}
+
+#roiTable th:nth-child(5),
+#roiTable td:nth-child(5){
+    width:70px;
+}
+
+input{
+
+    width:100%;
+
+    padding:8px;
+
+    box-sizing:border-box;
+
+    border:1px solid #d1d5db;
+    border-radius:6px;
+}
+
+.delete-btn{
+
+    width:36px;
+    height:36px;
+
+    padding:0;
+
+    margin:auto;
+
+    display:flex;
+    justify-content:center;
+    align-items:center;
+
+    background:#dc2626;
+
+    border:none;
+    border-radius:8px;
+
+    color:white;
+
+    cursor:pointer;
+}
+
+/* ================= BADGE ================= */
+
+.status-box{
+
+    margin-top:12px;
+
+    padding:10px 12px;
+
+    border-radius:8px;
+
+    background:#f9fafb;
+}
+
+.badge{
+
+    display:inline-block;
+
+    padding:5px 10px;
+
+    border-radius:999px;
+
+    font-size:13px;
+
+    color:white;
+}
+
+.badge-pending{
+    background:#dc2626;
+}
+
+.badge-done{
+    background:#16a34a;
+}
+
+.badge-error{
+    background:#6b7280;
+}
+
+/* =====================================================
+   RESPONSIVE
+===================================================== */
+
+@media (max-width: 1400px) {
+
+    .container{
+        width:96%;
+    }
+
+    .setup-layout{
+        grid-template-columns: 1fr 520px;
+    }
+
+    .roi-image-container #roiImage{
+        max-width:100%;
+    }
+
+}
+
+@media (max-width:1200px){
+
+    .container{
+        width:97%;
+        padding:14px;
+    }
+
+    .calibration-layout{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+
+    .setup-layout{
+        grid-template-columns:1fr 430px;
+    }
+
+    .roi-queue-panel{
+        min-width:430px;
+    }
+
+}
+
+@media (max-width:1000px){
+
+    .calibration-layout{
+        grid-template-columns:1fr;
+    }
+
+    .setup-layout{
+        grid-template-columns:1fr;
+    }
+
+    .roi-image-container{
+        width:100%;
+    }
+
+    .roi-image-container #roiImage{
+        width:100%;
+        max-width:900px;
+        height:auto;
+        margin:auto;
+    }
+
+    .roi-queue-panel{
+        min-width:0;
+        width:100%;
+    }
+
+}
+
+@media (max-width:700px){
+
+    .container{
+        width:100%;
+        padding:10px;
+    }
+
+    .card{
+        padding:15px;
+        border-radius:12px;
+    }
+
+    .reset-card-content{
+        flex-direction:column;
+        align-items:stretch;
+        gap:10px;
+    }
+
+    .reset-card #resetAllBtn{
+        width:100%;
+    }
+
+    .points{
+        grid-template-columns:1fr;
+    }
+
+    .button-row{
+        flex-direction:column;
+        align-items:stretch;
+    }
+
+    .button-row button{
+        width:100%;
+    }
+
+    .roi-toolbar{
+        grid-template-columns:1fr;
+    }
+
+    .roi-toolbar #drawRoiBtn{
+        width:100%;
+    }
+
+    .roi-status-box{
+        flex-direction:column;
+        align-items:flex-start;
+        gap:4px;
+    }
+
+    .status-divider{
+        display:none;
+    }
+
+    .roi-table-wrapper{
+        width:100%;
+        overflow-x:auto;
+    }
+
+    button{
+        max-width:100%;
+    }
+
+}

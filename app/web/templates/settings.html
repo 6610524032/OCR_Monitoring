@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>OCR Settings</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/navbar.css') }}"
+    >
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/settings.css') }}"
+    >
+</head>
+
+<body>
+
+{% include 'navbar.html' %}
+
+<div class="container">
+
+    <!-- =====================================================
+         0. RESET CONFIGURATION
+    ===================================================== -->
+
+    <div class="card reset-card">
+
+        <div class="reset-card-content">
+
+            <h2>0. Reset Configuration</h2>
+
+            <button
+                id="resetAllBtn"
+                type="button"
+            >
+                Reset All Configuration
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         1–2. CALIBRATION
+    ===================================================== -->
+
+    <div class="calibration-layout">
+
+        <!-- LEFT -->
+        <div class="card calibration-card calibration-input-card">
+
+            <h2>1. Screen Calibration</h2>
+
+            <div class="hint">
+                Click all four corners of the HMI screen.
+            </div>
+
+            {% if latest_image %}
+
+            <div class="image-container calibration-image-container">
+
+                <img
+                    id="hmiImage"
+                    src="/raw_images/{{ latest_image }}"
+                    data-current-image="{{ latest_image }}"
+                    alt="Raw HMI screen"
+                    draggable="false"
+                >
+
+                <canvas id="drawCanvas"></canvas>
+
+            </div>
+
+            <p class="image-path-row">
+                <b>Raw Image:</b>
+                <span id="imagePath">
+                    {{ latest_image }}
+                </span>
+            </p>
+
+            {% endif %}
+
+            <div class="points">
+
+                <div class="point-box">
+                    P1 Top Left:
+                    <span id="point1">-</span>
+                </div>
+
+                <div class="point-box">
+                    P2 Top Right:
+                    <span id="point2">-</span>
+                </div>
+
+                <div class="point-box">
+                    P3 Bottom Right:
+                    <span id="point3">-</span>
+                </div>
+
+                <div class="point-box">
+                    P4 Bottom Left:
+                    <span id="point4">-</span>
+                </div>
+
+            </div>
+
+            <div class="button-row">
+
+                <button
+                    id="saveBtn"
+                    type="button"
+                    disabled
+                >
+                    Save Calibration
+                </button>
+
+                <button
+                    id="resetBtn"
+                    type="button"
+                >
+                    Reset Points
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- RIGHT -->
+        <div class="card calibration-card calibration-result-card">
+
+            <h2>2. Calibration Result</h2>
+
+            {% if latest_calibrated_image %}
+
+            <p
+                id="testStatus"
+                class="calibration-status calibration-ready"
+            >
+                ✅ Calibration Ready
+            </p>
+
+            <div class="result-image-container">
+
+                <img
+                    id="calibratedPreview"
+                    src="/calibrated_images/{{ latest_calibrated_image }}"
+                    data-current-image="{{ latest_calibrated_image }}"
+                    alt="Calibrated HMI screen"
+                >
+
+            </div>
+
+            {% else %}
+
+            <p
+                id="testStatus"
+                class="calibration-status calibration-not-ready"
+            >
+                ❌ Calibration Not Ready
+            </p>
+
+            <div class="result-placeholder">
+                Calibration result will appear here.
+            </div>
+
+            {% endif %}
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         3. MANUAL ROI SETUP
+    ===================================================== -->
+
+    <div class="card roi-card">
+
+        <h2>3. Manual ROI Setup</h2>
+
+        <div class="roi-toolbar">
+            <div class="hint roi-hint">
+                Click "Draw ROI" and drag a rectangle around the numbers
+                you want to detect. The system will create IDs such as
+                No.01 and No.02.
+            </div>
+
+            {% if latest_calibrated_image %}
+            <button id="drawRoiBtn" type="button">
+                Draw ROI
+            </button>
+            {% endif %}
+        </div>
+
+        {% if latest_calibrated_image %}
+
+        <div class="status-box roi-status-box">
+            <span>
+                <b>Mode:</b>
+                <span id="modeText">Draw Mode OFF</span>
+            </span>
+
+            <span class="status-divider">|</span>
+
+            <span>
+                <b>Total ROI:</b>
+                <span id="roiCount">0</span>
+            </span>
+        </div>
+
+        <div class="setup-layout">
+
+            <div class="roi-image-panel">
+                <div class="image-container roi-image-container">
+                    <img
+                        id="roiImage"
+                        src="/calibrated_images/{{ latest_calibrated_image }}"
+                        data-current-image="{{ latest_calibrated_image }}"
+                        alt="ROI setup image"
+                        draggable="false"
+                    >
+                    <canvas id="roiCanvas"></canvas>
+                </div>
+            </div>
+
+            <div class="roi-queue-panel">
+                <h3>ROI Queue</h3>
+
+                <div class="table-wrapper roi-table-wrapper">
+                    <table id="roiTable">
+                        <thead>
+                            <tr>
+                                <th>No.</th>
+                                <th>OCR Value</th>
+                                <th>Tag Name</th>
+                                <th>Unit</th>
+                                <th>Delete</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <button id="saveAllBtn" type="button">
+                    Save All Tags
+                </button>
+            </div>
+
+        </div>
+
+        {% else %}
+
+        <p>Please save the calibration before setting up ROIs.</p>
+
+        {% endif %}
+
+    </div>
+
+
+    <!-- =====================================================
+         4. CONFIGURED TAGS
+    ===================================================== -->
+
+    <div class="card">
+
+        <h2>4. Configured Tags</h2>
+
+        <div class="table-wrapper">
+
+            <table>
+
+                <thead>
+                    <tr>
+                        <th>Tag</th>
+                        <th>Unit</th>
+                        <th>ROI</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for roi in roi_list %}
+
+                    <tr>
+                        <td>
+                            {{ roi.display_name }}
+                        </td>
+
+                        <td>
+                            {{ roi.unit }}
+                        </td>
+
+                        <td>
+                            ({{ roi.x1|int }}, {{ roi.y1|int }})
+                            -
+                            ({{ roi.x2|int }}, {{ roi.y2|int }})
+                        </td>
+                    </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+    window.SAVED_ROIS = JSON.parse(
+        '{{ roi_list | tojson | safe }}'
+    );
+</script>
+
+<script
+    src="{{ url_for('static', filename='js/settings.js') }}"
+></script>
+
+</body>
+</html>

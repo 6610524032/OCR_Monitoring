@@ -1,0 +1,59 @@
+services:
+  api:
+    build: .
+    container_name: ocr_api
+    command: python -m app.server.api_app
+    ports:
+      - "5001:5001"
+    environment:
+      - PYTHONPATH=/app
+      - API_KEY=${API_KEY:-dev-api-key}
+      - HF_HOME=/app/model_cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
+    volumes:
+      - ./app/server/data:/app/app/server/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/api/health')"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: .
+    container_name: ocr_worker
+    command: python -m app.processing.main_worker
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - PYTHONPATH=/app
+      - API_KEY=${API_KEY:-dev-api-key}
+      - API_SERVER_URL=http://api:5001
+      - HF_HOME=/app/model_cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
+    volumes:
+      - ./app/server/data:/app/app/server/data
+
+  web:
+    build: .
+    container_name: ocr_web
+    command: python -m app.web.web_app
+    ports:
+      - "5000:5000"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - PYTHONPATH=/app
+      - API_KEY=${API_KEY:-dev-api-key}
+      - API_SERVER_URL=http://api:5001
+      - HF_HOME=/app/model_cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
+    volumes:
+      - ./app/server/data:/app/app/server/data

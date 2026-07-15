@@ -1,0 +1,56 @@
+<header class="topbar">
+
+    <div class="topbar-brand">
+
+        {% if request.path == '/dashboard' %}
+            <h1>OCR Monitoring Dashboard</h1>
+            <p>Machine Screen OCR Monitoring</p>
+
+        {% elif request.path == '/live' %}
+            <h1>Live Camera</h1>
+            <p>Real-time RTSP Camera Feed</p>
+
+        {% elif request.path == '/history' %}
+            <h1>Historical Data</h1>
+            <p>OCR History and Trend Monitoring</p>
+
+        {% elif request.path == '/settings' %}
+            <h1>OCR Settings</h1>
+            <p>Calibration &amp; Manual ROI Setup</p>
+        {% endif %}
+
+    </div>
+
+    <nav class="topbar-nav">
+
+        <a
+            href="/dashboard"
+            class="nav-link {% if request.path == '/dashboard' %}active{% endif %}"
+        >
+            Dashboard
+        </a>
+
+        <a
+            href="/live"
+            class="nav-link {% if request.path == '/live' %}active{% endif %}"
+        >
+            Live Camera
+        </a>
+
+        <a
+            href="/history"
+            class="nav-link {% if request.path == '/history' %}active{% endif %}"
+        >
+            History
+        </a>
+
+        <a
+            href="/settings"
+            class="nav-link {% if request.path == '/settings' %}active{% endif %}"
+        >
+            Settings
+        </a>
+
+    </nav>
+
+</header>

@@ -1,0 +1,13 @@
+Flask
+flask-cors
+numpy
+opencv-python-headless
+Pillow
+transformers<5
+sentencepiece
+safetensors
+huggingface_hub
+requests
+tiktoken
+protobuf
+tokenizers

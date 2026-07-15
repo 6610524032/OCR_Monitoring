@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Camera</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/navbar.css') }}">
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='css/live.css') }}">
+</head>
+
+<body>
+
+{% include 'navbar.html' %}
+
+<div class="container">
+
+    <div class="card">
+
+        <h2>Camera Live View</h2>
+
+        <div class="camera-frame">
+
+            <img
+                src="/video_feed"
+                alt="Live Camera"
+            >
+
+        </div>
+
+    </div>
+
+</div>
+
+</body>
+</html>

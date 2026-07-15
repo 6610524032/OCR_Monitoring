@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>OCR Monitoring Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+
+<body>
+
+{% include 'navbar.html' %}
+
+<div class="container">
+
+    <div id="dashboard-content">
+
+        <div class="card empty">
+            <h2>Loading...</h2>
+            <p>Loading latest OCR data</p>
+        </div>
+
+    </div>
+
+</div>
+
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+
+</body>
+</html>

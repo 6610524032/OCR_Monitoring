@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Historical Data</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/history.css') }}">
+</head>
+<body>
+{% include 'navbar.html' %}
+<div class="container">
+
+<div id="reviewBanner" class="review-banner">
+
+    <span>
+        ⚠️ มีข้อมูลผิดปกติ
+        <span id="reviewCount">0</span>
+        รายการ รอการตรวจสอบ
+    </span>
+
+    <span
+        id="reviewToggle"
+        style="
+            float:right;
+            cursor:pointer;
+            color:#9ca3af;
+            font-weight:normal;
+        "
+    >
+        ▼ ดูรายการ
+    </span>
+
+</div>
+<div id="reviewListCard" class="card review-list">
+
+    <div id="reviewList"></div>
+
+</div>
+<div class="card"><h2>History Trend</h2><div class="controls"><div class="control-box"><label for="variableSelect">Variable</label><select id="variableSelect"></select></div><div class="control-box"><label>Time Range</label><select disabled><option>Last 2 Days</option></select></div></div><div class="legend"><div class="legend-item"><span class="dot dot-blue"></span>OCR read all tags</div><div class="legend-item"><span class="dot dot-red"></span>OCR has missing tags</div></div></div>
+<div class="card"><div id="chartStatus" class="empty-box">Loading history data...</div><div class="chart-wrap"><svg id="historyChart" viewBox="0 0 1000 460" preserveAspectRatio="none" style="display:none;"></svg></div></div>
+</div>
+<div id="detailModalBg" class="modal-bg"><div class="modal"><div class="modal-header"><div><h2 id="modalTitle">OCR Detail</h2><p id="modalSubtitle"></p></div><button class="close-btn" type="button" onclick="closeModal()">Close</button></div><div id="modalStatus"></div><br><img id="modalImage" class="image-preview" style="display:none;"><div id="modalNoImage" class="empty-box" style="display:none;">No image found for this run</div><table><thead><tr><th>Tag</th><th>Value</th><th>Unit</th><th>Edit</th></tr></thead><tbody id="modalValues"></tbody></table></div></div>
+
+<div id="fixModal" class="fix-modal">
+
+    <div class="fix-content">
+
+        <div class="fix-left">
+
+            <img id="fixImage">
+
+        </div>
+
+        <div class="fix-right">
+
+            <h2>Manual Fix</h2>
+
+            <table id="fixTable">
+
+                <thead>
+                    <tr>
+                        <th>Tag</th>
+                        <th>Value</th>
+                        <th>Unit</th>
+                        <th>Edit</th>
+                    </tr>
+                </thead>
+
+                <tbody></tbody>
+
+            </table>
+
+            <button id="saveFixBtn">
+                Save
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+<script src="{{ url_for('static', filename='js/history.js') }}"></script>
+</body>
+</html>
