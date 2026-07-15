@@ -22,14 +22,14 @@ V3
 │   ├── processing
 │   │     Image processing, OCR, calibration and worker
 │   │
-│   ├── repositories
-│   │     Database access layer
-│   │
-│   ├── routes
-│   │     API endpoints
-│   │
 │   ├── server
-│   │     API server, database and configuration
+│   │     ├── api_app.py
+│   │     ├── database.py
+│   │     ├── config.py
+│   │     ├── repositories
+│   │     │      Database access layer
+│   │     └── routes
+│   │            REST API endpoints
 │   │
 │   └── web
 │         Flask web interface
