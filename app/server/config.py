@@ -64,3 +64,8 @@ MODEL_CACHE_DIR = Path(
         str(BASE_DIR.parent / "model_cache" / "huggingface")
     )
 )
+
+MODEL_CACHE_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)

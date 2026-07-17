@@ -10,6 +10,9 @@ from app.server.config import (
 )
 
 
+MODEL_NAME = "microsoft/trocr-base-printed"
+
+
 MODEL_CACHE_DIR.mkdir(
     parents=True,
     exist_ok=True
@@ -18,12 +21,11 @@ MODEL_CACHE_DIR.mkdir(
 os.environ["HF_HOME"] = str(MODEL_CACHE_DIR)
 os.environ["HUGGINGFACE_HUB_CACHE"] = str(MODEL_CACHE_DIR)
 
+
 from transformers import (
     TrOCRProcessor,
     VisionEncoderDecoderModel
 )
-
-from app.server.config import CALIBRATED_IMAGES_DIR
 
 
 TROCR_PROCESSOR = None
@@ -34,19 +36,29 @@ def load_model():
     global TROCR_PROCESSOR, TROCR_MODEL
 
     if TROCR_PROCESSOR is None:
+        print("[TrOCR] Loading processor...")
+
         TROCR_PROCESSOR = TrOCRProcessor.from_pretrained(
-            "microsoft/trocr-base-printed",
+            MODEL_NAME,
             cache_dir=str(MODEL_CACHE_DIR),
             local_files_only=True,
             use_fast=False
         )
 
+        print("[TrOCR] Processor loaded")
+
     if TROCR_MODEL is None:
+        print("[TrOCR] Loading model...")
+
         TROCR_MODEL = VisionEncoderDecoderModel.from_pretrained(
-            "microsoft/trocr-base-printed",
+            MODEL_NAME,
             cache_dir=str(MODEL_CACHE_DIR),
             local_files_only=True
         )
+
+        TROCR_MODEL.eval()
+
+        print("[TrOCR] Model loaded")
 
     return TROCR_PROCESSOR, TROCR_MODEL
 

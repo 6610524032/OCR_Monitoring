@@ -28,11 +28,10 @@ RUN python -c "import sentencepiece, tiktoken, google.protobuf; print('TOKENIZER
 
 RUN pip install --no-cache-dir -r /app/requirements-torch.txt
 
+COPY app /app/app
 COPY preload_model.py /app/preload_model.py
 
 RUN python /app/preload_model.py
-
-COPY app /app/app
 
 EXPOSE 5000
 EXPOSE 5001

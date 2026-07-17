@@ -1,24 +1,43 @@
-__pycache__/
-*.pyc
-
-.env
-
+# Python virtual environment
 venv/
 .venv/
 
-.idea/
-.vscode/
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
 
+# TrOCR / Hugging Face model cache
+model_cache/
+.cache/
+huggingface/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
 *.db
 *.sqlite
 *.sqlite3
 
-app/server/data/database.db
-
-model_cache/
-
+# Logs
 *.log
+logs/
 
+# IDE
+.vscode/
+.idea/
+
+# Operating system
 .DS_Store
-
 Thumbs.db
+
+# Test and temporary files
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+tmp/
+temp/
