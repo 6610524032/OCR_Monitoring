@@ -13,37 +13,124 @@ body {
     background: white;
     padding: 20px;
     border-radius: 14px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     text-align: center;
 }
 
-.camera-frame{
+.camera-frame {
+    position: relative;
 
-    width:100%;
+    width: 100%;
+    max-width: 1100px;
 
-    max-width:1100px;
+    margin: 20px auto 0;
 
-    margin:20px auto 0;
+    aspect-ratio: 16 / 8.5;
 
-    aspect-ratio:16/8.5;
+    background: #e7ebf0;
+    border: 1px solid #d8dde5;
+    border-radius: 12px;
 
-    background:#e7ebf0;
-
-    border:1px solid #d8dde5;
-
-    border-radius:12px;
-
-    overflow:hidden;
+    overflow: hidden;
 }
 
-.camera-frame img{
+.camera-frame img {
+    width: 100%;
+    height: 100%;
 
-    width:100%;
-    height:100%;
+    display: block;
 
-    display:block;
+    object-fit: contain;
+    background: #e7ebf0;
+}
 
-    object-fit:contain;
+.camera-offline {
+    position: absolute;
+    inset: 0;
 
-    background:#e7ebf0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    gap: 10px;
+
+    padding: 20px;
+
+    background: #f8fafc;
+    color: #6b7280;
+}
+
+.camera-offline[hidden] {
+    display: none;
+}
+
+.camera-offline strong {
+    color: #dc2626;
+    font-size: 26px;
+}
+
+.camera-offline span {
+    font-size: 15px;
+}
+
+.live-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.camera-status {
+    display: inline-flex;
+    align-items: center;
+
+    min-height: 38px;
+    padding: 0 14px;
+
+    border-radius: 8px;
+
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.camera-status.testing {
+    color: #92400e;
+    background: #fef3c7;
+}
+
+.camera-status.connected {
+    color: #166534;
+    background: #dcfce7;
+}
+
+.camera-status.offline {
+    color: #991b1b;
+    background: #fee2e2;
+}
+
+#retryCameraBtn {
+    margin: 0;
+    padding: 10px 17px;
+
+    border: none;
+    border-radius: 8px;
+
+    background: #2563eb;
+    color: #ffffff;
+
+    font-size: 14px;
+    cursor: pointer;
+}
+
+#retryCameraBtn:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+#retryCameraBtn:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
 }

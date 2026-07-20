@@ -195,6 +195,26 @@ button:disabled {
     font-size: 14px;
 }
 
+/* Camera buttons */
+
+#testCameraBtn {
+    background: #2563eb;
+}
+
+#testCameraBtn:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+#saveCameraBtn {
+    background: #16a34a;
+}
+
+#saveCameraBtn:hover:not(:disabled) {
+    background: #15803d;
+}
+
+/* Calibration buttons */
+
 #saveBtn {
     background: #2563eb;
 }
@@ -226,7 +246,6 @@ button:disabled {
 
     background: #dc2626;
 }
-
 
 /* =====================================================
    CALIBRATION

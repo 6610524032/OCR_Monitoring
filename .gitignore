@@ -41,3 +41,8 @@ Thumbs.db
 htmlcov/
 tmp/
 temp/
+
+# Runtime generated data
+app/server/data/raw_images/
+app/server/data/calibrated_images/
+app/server/data/incoming/

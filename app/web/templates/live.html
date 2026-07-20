@@ -4,11 +4,15 @@
     <meta charset="UTF-8">
     <title>Live Camera</title>
 
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='css/navbar.css') }}">
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/navbar.css') }}"
+    >
 
-    <link rel="stylesheet"
-          href="{{ url_for('static', filename='css/live.css') }}">
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/live.css') }}"
+    >
 </head>
 
 <body>
@@ -24,15 +28,145 @@
         <div class="camera-frame">
 
             <img
+                id="liveCameraImage"
                 src="/video_feed"
                 alt="Live Camera"
             >
+
+            <div
+                id="cameraOffline"
+                class="camera-offline"
+                hidden
+            >
+                <strong>Camera Offline</strong>
+                <span>ไม่สามารถเชื่อมต่อกล้องได้</span>
+            </div>
+
+        </div>
+
+        <div class="live-controls">
+
+            <span
+                id="cameraStatus"
+                class="camera-status testing"
+            >
+                กำลังเชื่อมต่อกล้อง...
+            </span>
+
+            <button
+                id="retryCameraBtn"
+                type="button"
+            >
+                Retry Connection
+            </button>
 
         </div>
 
     </div>
 
 </div>
+
+<script>
+    const liveCameraImage =
+        document.getElementById(
+            "liveCameraImage"
+        );
+
+    const cameraOffline =
+        document.getElementById(
+            "cameraOffline"
+        );
+
+    const cameraStatus =
+        document.getElementById(
+            "cameraStatus"
+        );
+
+    const retryCameraBtn =
+        document.getElementById(
+            "retryCameraBtn"
+        );
+
+
+    function setCameraTesting() {
+        cameraStatus.innerText =
+            "กำลังเชื่อมต่อกล้อง...";
+
+        cameraStatus.className =
+            "camera-status testing";
+
+        cameraOffline.hidden = true;
+        liveCameraImage.hidden = false;
+    }
+
+
+    function setCameraConnected() {
+        cameraStatus.innerText =
+            "เชื่อมต่อกล้องสำเร็จ";
+
+        cameraStatus.className =
+            "camera-status connected";
+
+        cameraOffline.hidden = true;
+        liveCameraImage.hidden = false;
+    }
+
+
+    function setCameraOffline() {
+        cameraStatus.innerText =
+            "กล้องไม่ตอบสนอง";
+
+        cameraStatus.className =
+            "camera-status offline";
+
+        liveCameraImage.hidden = true;
+        cameraOffline.hidden = false;
+    }
+
+
+    function reconnectCamera() {
+        setCameraTesting();
+
+        retryCameraBtn.disabled = true;
+        retryCameraBtn.innerText =
+            "Connecting...";
+
+        liveCameraImage.src =
+            "/video_feed?t=" +
+            Date.now();
+
+        setTimeout(
+            function () {
+                retryCameraBtn.disabled = false;
+                retryCameraBtn.innerText =
+                    "Retry Connection";
+            },
+            1500
+        );
+    }
+
+
+    liveCameraImage.addEventListener(
+        "load",
+        function () {
+            setCameraConnected();
+        }
+    );
+
+
+    liveCameraImage.addEventListener(
+        "error",
+        function () {
+            setCameraOffline();
+        }
+    );
+
+
+    retryCameraBtn.addEventListener(
+        "click",
+        reconnectCamera
+    );
+</script>
 
 </body>
 </html>

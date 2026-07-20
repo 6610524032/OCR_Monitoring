@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
-
+import cv2
+from urllib.parse import quote
 from app.server.auth import require_api_key
 from app.server.repositories.camera_repository import (
     get_active_camera,
@@ -116,3 +117,53 @@ def api_save_camera_config():
         "ok": True,
         "message": "Camera configuration saved"
     })
+
+@camera_bp.route("/api/camera/test", methods=["POST"])
+@require_api_key
+def api_test_camera():
+
+    data = request.get_json(silent=True) or {}
+
+    try:
+        camera_ip = str(data.get("camera_ip", "")).strip()
+        camera_port = int(data.get("camera_port", 554))
+        camera_username = str(data.get("camera_username", "")).strip()
+        camera_password = str(data.get("camera_password", "")).strip()
+        rtsp_path = str(data.get("rtsp_path", "")).strip()
+
+        if not rtsp_path.startswith("/"):
+            rtsp_path = "/" + rtsp_path
+
+        username = quote(camera_username, safe="")
+        password = quote(camera_password, safe="")
+
+        rtsp_url = (
+            f"rtsp://{username}:{password}"
+            f"@{camera_ip}:{camera_port}{rtsp_path}"
+        )
+
+        cap = cv2.VideoCapture(rtsp_url)
+
+        ok, _ = cap.read()
+
+        cap.release()
+
+        if ok:
+            return jsonify({
+                "ok": True,
+                "message": "Camera connected successfully."
+            })
+
+        return jsonify({
+            "ok": False,
+            "message": "Cannot connect to camera."
+        })
+
+    except Exception as error:
+
+        print("Camera test error:", error)
+
+        return jsonify({
+            "ok": False,
+            "message": str(error)
+        }), 500

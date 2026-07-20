@@ -1621,6 +1621,12 @@ if (saveCameraBtn) {
         "click",
         async function () {
 
+            const originalText =
+                saveCameraBtn.innerText;
+
+            saveCameraBtn.disabled = true;
+            saveCameraBtn.innerText = "Saving...";
+
             const payload = {
 
                 camera_name:
@@ -1702,6 +1708,11 @@ if (saveCameraBtn) {
                     "Cannot save camera configuration."
                 );
 
+            } finally {
+
+                saveCameraBtn.disabled = false;
+                saveCameraBtn.innerText = originalText;
+
             }
 
         }
@@ -1709,6 +1720,114 @@ if (saveCameraBtn) {
 
 }
 
+/* =====================================================
+   TEST CAMERA CONNECTION
+===================================================== */
+
+const testCameraBtn =
+    document.getElementById(
+        "testCameraBtn"
+    );
+
+if (testCameraBtn) {
+
+    testCameraBtn.addEventListener(
+        "click",
+        async function () {
+
+            const originalText =
+                testCameraBtn.innerText;
+
+            testCameraBtn.disabled = true;
+            testCameraBtn.innerText = "Testing...";
+
+            const payload = {
+
+                camera_ip:
+                    document.getElementById(
+                        "cameraIp"
+                    ).value.trim(),
+
+                camera_port:
+                    parseInt(
+                        document.getElementById(
+                            "cameraPort"
+                        ).value,
+                        10
+                    ) || 554,
+
+                camera_username:
+                    document.getElementById(
+                        "cameraUsername"
+                    ).value.trim(),
+
+                camera_password:
+                    document.getElementById(
+                        "cameraPassword"
+                    ).value,
+
+                rtsp_path:
+                    document.getElementById(
+                        "cameraRtspPath"
+                    ).value.trim()
+            };
+
+            try {
+
+                const response =
+                    await fetch(
+                        "/web_api/api/camera/test",
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify(
+                                payload
+                            )
+                        }
+                    );
+
+                const result =
+                    await response.json();
+
+                if (result.ok) {
+
+                    alert(
+                        result.message
+                    );
+
+                } else {
+
+                    alert(
+                        result.message ||
+                        "Cannot connect camera."
+                    );
+
+                }
+
+            } catch (error) {
+
+                console.error(error);
+
+                alert(
+                    "Cannot connect camera."
+                );
+
+            } finally {
+
+                testCameraBtn.disabled = false;
+                testCameraBtn.innerText = originalText;
+
+            }
+
+        }
+    );
+
+}
 
 /* =====================================================
    LOAD CAMERA CONFIGURATION

@@ -12,7 +12,7 @@ from app.server.config import (
 )
 from app.server.camera_client import (
     CameraConfigError,
-    get_camera_config
+    reload_camera_config
 )
 
 app = Flask(__name__)
@@ -116,59 +116,79 @@ def video_feed():
 
 
 def generate_camera_frames():
-    try:
-        camera = get_camera_config()
 
-    except CameraConfigError as error:
-        print(
-            "[LIVE CAMERA CONFIG ERROR]",
-            str(error)
+    while True:
+
+        try:
+            camera = reload_camera_config()
+
+        except CameraConfigError as error:
+            print(
+                "[LIVE CAMERA CONFIG ERROR]",
+                str(error)
+            )
+
+            time.sleep(2)
+            continue
+
+        cap = cv2.VideoCapture(
+            camera.rtsp_url,
+            cv2.CAP_FFMPEG
         )
-        return
 
-    cap = cv2.VideoCapture(
-        camera.rtsp_url,
-        cv2.CAP_FFMPEG
-    )
+        if not cap.isOpened():
+            print(
+                "[LIVE CAMERA ERROR]",
+                "Cannot open RTSP stream"
+            )
 
-    if not cap.isOpened():
-        print(
-            "[LIVE CAMERA ERROR]",
-            "Cannot open RTSP stream"
-        )
-        cap.release()
-        return
+            cap.release()
 
-    try:
-        while True:
-            success, frame = cap.read()
+            time.sleep(2)
+            continue
 
-            if not success:
-                print(
-                    "[LIVE CAMERA ERROR]",
-                    "Cannot read RTSP frame"
+        try:
+
+            while True:
+
+                success, frame = cap.read()
+
+                if not success:
+
+                    print(
+                        "[LIVE CAMERA ERROR]",
+                        "Cannot read RTSP frame"
+                    )
+
+                    break
+
+                encoded, buffer = cv2.imencode(
+                    ".jpg",
+                    frame
                 )
-                break
 
-            encoded, buffer = cv2.imencode(
-                ".jpg",
-                frame
-            )
+                if not encoded:
+                    continue
 
-            if not encoded:
-                continue
+                frame_bytes = buffer.tobytes()
 
-            frame_bytes = buffer.tobytes()
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + frame_bytes +
+                    b"\r\n"
+                )
 
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n"
-                + frame_bytes
-                + b"\r\n"
-            )
+        finally:
 
-    finally:
-        cap.release()
+            cap.release()
+
+        print(
+            "[LIVE CAMERA]",
+            "Reconnect in 2 seconds..."
+        )
+
+        time.sleep(2)
 
 @app.route("/web_api/<path:api_path>", methods=["GET", "POST"])
 def web_api_proxy(api_path):
