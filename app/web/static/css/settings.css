@@ -223,6 +223,14 @@ button:disabled {
     background: #dc2626;
 }
 
+#captureImageBtn {
+    background: #2563eb;
+}
+
+#captureImageBtn:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
 #resetAllBtn {
     background: #991b1b;
 }

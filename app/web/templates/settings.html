@@ -126,136 +126,143 @@
 
     </div>
 
-    <!-- =====================================================
-         2-3. CALIBRATION
-    ===================================================== -->
+<!-- =====================================================
+     2-3. CALIBRATION
+===================================================== -->
 
-    <div class="calibration-layout">
+<div class="calibration-layout">
 
-        <!-- LEFT -->
-        <div class="card calibration-card calibration-input-card">
+    <!-- LEFT -->
+    <div class="card calibration-card calibration-input-card">
 
-            <h2>2. Screen Calibration</h2>
+        <h2>2. Screen Calibration</h2>
 
-            <div class="hint">
-                Click all four corners of the HMI screen.
-            </div>
+        <div class="hint">
+            Step 1 : Capture an image from the camera.<br>
+            Step 2 : Click the four corners of the HMI screen.
+        </div>
 
-            {% if latest_image %}
+        <!-- Calibration Buttons -->
+        <div class="button-row">
 
-            <div class="image-container calibration-image-container">
+            <button
+                id="captureImageBtn"
+                type="button"
+            >
+                Capture Image
+            </button>
 
-                <img
-                    id="hmiImage"
-                    src="/raw_images/{{ latest_image }}"
-                    data-current-image="{{ latest_image }}"
-                    alt="Raw HMI screen"
-                    draggable="false"
-                >
+            <button
+                id="saveBtn"
+                type="button"
+                disabled
+            >
+                Save Calibration
+            </button>
 
-                <canvas id="drawCanvas"></canvas>
-
-            </div>
-
-            <p class="image-path-row">
-                <b>Raw Image:</b>
-                <span id="imagePath">
-                    {{ latest_image }}
-                </span>
-            </p>
-
-            {% endif %}
-
-            <div class="points">
-
-                <div class="point-box">
-                    P1 Top Left:
-                    <span id="point1">-</span>
-                </div>
-
-                <div class="point-box">
-                    P2 Top Right:
-                    <span id="point2">-</span>
-                </div>
-
-                <div class="point-box">
-                    P3 Bottom Right:
-                    <span id="point3">-</span>
-                </div>
-
-                <div class="point-box">
-                    P4 Bottom Left:
-                    <span id="point4">-</span>
-                </div>
-
-            </div>
-
-            <div class="button-row">
-
-                <button
-                    id="saveBtn"
-                    type="button"
-                    disabled
-                >
-                    Save Calibration
-                </button>
-
-                <button
-                    id="resetBtn"
-                    type="button"
-                >
-                    Reset Points
-                </button>
-
-            </div>
+            <button
+                id="resetBtn"
+                type="button"
+            >
+                Reset Points
+            </button>
 
         </div>
 
+        {% if latest_image %}
 
-        <!-- RIGHT -->
-        <div class="card calibration-card calibration-result-card">
+        <div class="image-container calibration-image-container">
 
-            <h2>3. Calibration Result</h2>
-
-            {% if latest_calibrated_image %}
-
-            <p
-                id="testStatus"
-                class="calibration-status calibration-ready"
+            <img
+                id="hmiImage"
+                src="/raw_images/{{ latest_image }}"
+                data-current-image="{{ latest_image }}"
+                alt="Raw HMI screen"
+                draggable="false"
             >
-                ✅ Calibration Ready
-            </p>
 
-            <div class="result-image-container">
+            <canvas id="drawCanvas"></canvas>
 
-                <img
-                    id="calibratedPreview"
-                    src="/calibrated_images/{{ latest_calibrated_image }}"
-                    data-current-image="{{ latest_calibrated_image }}"
-                    alt="Calibrated HMI screen"
-                >
+        </div>
 
+        <p class="image-path-row">
+            <b>Raw Image:</b>
+            <span id="imagePath">
+                {{ latest_image }}
+            </span>
+        </p>
+
+        {% endif %}
+
+        <div class="points">
+
+            <div class="point-box">
+                P1 Top Left:
+                <span id="point1">-</span>
             </div>
 
-            {% else %}
-
-            <p
-                id="testStatus"
-                class="calibration-status calibration-not-ready"
-            >
-                ❌ Calibration Not Ready
-            </p>
-
-            <div class="result-placeholder">
-                Calibration result will appear here.
+            <div class="point-box">
+                P2 Top Right:
+                <span id="point2">-</span>
             </div>
 
-            {% endif %}
+            <div class="point-box">
+                P3 Bottom Right:
+                <span id="point3">-</span>
+            </div>
+
+            <div class="point-box">
+                P4 Bottom Left:
+                <span id="point4">-</span>
+            </div>
 
         </div>
 
     </div>
 
+    <!-- RIGHT -->
+    <div class="card calibration-card calibration-result-card">
+
+        <h2>3. Calibration Result</h2>
+
+        {% if latest_calibrated_image %}
+
+        <p
+            id="testStatus"
+            class="calibration-status calibration-ready"
+        >
+            ✅ Calibration Ready
+        </p>
+
+        <div class="result-image-container">
+
+            <img
+                id="calibratedPreview"
+                src="/calibrated_images/{{ latest_calibrated_image }}"
+                data-current-image="{{ latest_calibrated_image }}"
+                alt="Calibrated HMI screen"
+            >
+
+        </div>
+
+        {% else %}
+
+        <p
+            id="testStatus"
+            class="calibration-status calibration-not-ready"
+        >
+            ❌ Calibration Not Ready
+        </p>
+
+        <div class="result-placeholder">
+            Calibration result will appear here.
+        </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
 
     <!-- =====================================================
          4. MANUAL ROI SETUP

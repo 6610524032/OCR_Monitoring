@@ -6,7 +6,11 @@ from app.server.repositories.camera_repository import (
     get_active_camera,
     save_camera_config
 )
+from pathlib import Path
 
+from app.processing.rtsp_capture import (
+    capture_rtsp_image
+)
 
 camera_bp = Blueprint(
     "camera",
@@ -166,4 +170,45 @@ def api_test_camera():
         return jsonify({
             "ok": False,
             "message": str(error)
+        }), 500
+
+
+@camera_bp.route("/api/capture_image", methods=["POST"])
+@require_api_key
+def api_capture_image():
+
+    try:
+
+        image_path = capture_rtsp_image()
+
+        if image_path is None:
+
+            return jsonify({
+                "ok": False,
+                "message": "Cannot capture image."
+            }), 500
+
+        return jsonify({
+
+            "ok": True,
+
+            "image": Path(image_path).name,
+
+            "message": "Image captured successfully."
+
+        })
+
+    except Exception as error:
+
+        print(
+            "Capture image error:",
+            error
+        )
+
+        return jsonify({
+
+            "ok": False,
+
+            "message": str(error)
+
         }), 500

@@ -446,65 +446,139 @@ if (resetBtn) {
 }
 
 
-const saveBtn =
-    document.getElementById("saveBtn");
+const captureImageBtn =
+    document.getElementById(
+        "captureImageBtn"
+    );
 
-if (saveBtn) {
-    saveBtn.addEventListener(
-        "click",
-        async function () {
-            if (sortedPoints.length !== 4) {
-                alert(
-                    "กรุณาเลือกให้ครบ 4 จุดก่อน"
+
+function wait(milliseconds) {
+    return new Promise(function (resolve) {
+        setTimeout(resolve, milliseconds);
+    });
+}
+
+
+function loadRawImageImmediately(
+    imageUrl,
+    imageName
+) {
+    return new Promise(function (
+        resolve,
+        reject
+    ) {
+        if (!hmiImage) {
+            reject(
+                new Error(
+                    "Calibration image element missing."
+                )
+            );
+            return;
+        }
+
+        hmiImage.onload = function () {
+            drawCtx =
+                setupCanvasForImage(
+                    hmiImage,
+                    drawCanvas
                 );
-                return;
+
+            drawCalibrationPoints();
+
+            resolve();
+        };
+
+        hmiImage.onerror = function () {
+            reject(
+                new Error(
+                    "Cannot load captured image."
+                )
+            );
+        };
+
+        hmiImage.dataset.currentImage =
+            imageName;
+
+        hmiImage.src =
+            imageUrl +
+            "?t=" +
+            Date.now();
+    });
+}
+
+
+async function refreshCapturedImage(
+    expectedImage
+) {
+    const maximumAttempts = 20;
+
+    for (
+        let attempt = 0;
+        attempt < maximumAttempts;
+        attempt++
+    ) {
+        const response = await fetch(
+            "/web_api/api/latest_raw_image" +
+            "?t=" +
+            Date.now(),
+            {
+                cache: "no-store"
             }
+        );
+
+        const result =
+            await response.json();
+
+        if (
+            result.ok &&
+            result.image &&
+            result.image_url &&
+            result.image === expectedImage
+        ) {
+            await loadRawImageImmediately(
+                result.image_url,
+                result.image
+            );
 
             const imagePathElement =
                 document.getElementById(
                     "imagePath"
                 );
 
-            if (!imagePathElement) {
-                alert("ไม่พบชื่อภาพ");
-                return;
+            if (imagePathElement) {
+                imagePathElement.innerText =
+                    result.image;
             }
 
-            const imagePath =
-                imagePathElement.innerText.trim();
+            return true;
+        }
+
+        await wait(250);
+    }
+
+    return false;
+}
+
+
+if (captureImageBtn) {
+    captureImageBtn.addEventListener(
+        "click",
+        async function () {
+            const originalText =
+                captureImageBtn.innerText;
+
+            captureImageBtn.disabled = true;
+            captureImageBtn.innerText =
+                "Capturing...";
 
             try {
-                const response = await fetch(
-                    "/web_api/api/save_calibration",
-                    {
-                        method: "POST",
-                        headers: {
-                            "Content-Type":
-                                "application/json"
-                        },
-                        body: JSON.stringify({
-                            image_path: imagePath,
-                            points: [
-                                {
-                                    x: sortedPoints[0].realX,
-                                    y: sortedPoints[0].realY
-                                },
-                                {
-                                    x: sortedPoints[1].realX,
-                                    y: sortedPoints[1].realY
-                                },
-                                {
-                                    x: sortedPoints[2].realX,
-                                    y: sortedPoints[2].realY
-                                },
-                                {
-                                    x: sortedPoints[3].realX,
-                                    y: sortedPoints[3].realY
-                                }
-                            ]
-                        })
-                    }
-                );
+                const response =
+                    await fetch(
+                        "/web_api/api/capture_image",
+                        {
+                            method: "POST"
+                        }
+                    );
 
                 const result =
                     await response.json();
@@ -512,46 +586,64 @@ if (saveBtn) {
                 if (!result.ok) {
                     alert(
                         result.message ||
-                        "Save Calibration failed"
+                        "Capture failed."
                     );
+
                     return;
                 }
 
-                const status =
-                    document.getElementById(
-                        "testStatus"
-                    );
+                /*
+                ล้างจุด Calibration เดิม เพราะเป็นภาพใหม่
+                */
+                rawPoints = [];
+                sortedPoints = [];
 
-                if (status) {
-                    status.innerText =
-                        "Creating calibration...";
-                }
+                updatePointText();
 
-                const testResponse =
-                    await fetch(
-                        "/web_api/api/test_calibration",
-                        {
-                            method: "POST"
-                        }
-                    );
-
-                const testResult =
-                    await testResponse.json();
-
-                if (testResult.ok) {
-                    location.reload();
-                } else {
-                    alert(
-                        testResult.message ||
-                        "Calibration test failed"
+                if (drawCtx && drawCanvas) {
+                    drawCtx.clearRect(
+                        0,
+                        0,
+                        drawCanvas.width,
+                        drawCanvas.height
                     );
                 }
+
+                captureImageBtn.innerText =
+                    "Loading image...";
+
+                const imageLoaded =
+                    await refreshCapturedImage(
+                        result.image
+                    );
+
+                if (!imageLoaded) {
+                    throw new Error(
+                        "Captured image was not available in time."
+                    );
+                }
+
+                /*
+                กล่อง OK จะแสดงหลังรูปใหม่โหลดเสร็จแล้ว
+                */
+                alert(
+                    "Image captured successfully."
+                );
+
             } catch (error) {
-                console.error(error);
+                console.error(
+                    "Capture image error:",
+                    error
+                );
 
                 alert(
-                    "Cannot save calibration"
+                    "Cannot capture or load image."
                 );
+
+            } finally {
+                captureImageBtn.disabled = false;
+                captureImageBtn.innerText =
+                    originalText;
             }
         }
     );
