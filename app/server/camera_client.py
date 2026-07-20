@@ -15,6 +15,7 @@ CAMERA_CONFIG_API_PATH = "/api/camera/config"
 class CameraConfig:
     camera_name: str
     camera_ip: str
+    camera_port: int
     camera_username: str
     camera_password: str
     rtsp_path: str
@@ -27,6 +28,7 @@ class CameraConfigError(RuntimeError):
 
 def build_rtsp_url(
     camera_ip: str,
+    camera_port: int,
     camera_username: str,
     camera_password: str,
     rtsp_path: str
@@ -71,7 +73,7 @@ def build_rtsp_url(
 
     return (
         f"rtsp://{username}:{password}"
-        f"@{camera_ip}{rtsp_path}"
+        f"@{camera_ip}:{camera_port}{rtsp_path}"
     )
 
 
@@ -109,6 +111,10 @@ def fetch_camera_config() -> CameraConfig:
         camera.get("camera_ip", "")
     ).strip()
 
+    camera_port = int(
+        camera.get("camera_port", 554)
+    )
+
     camera_username = str(
         camera.get("camera_username", "")
     ).strip()
@@ -123,6 +129,7 @@ def fetch_camera_config() -> CameraConfig:
 
     rtsp_url = build_rtsp_url(
         camera_ip=camera_ip,
+        camera_port=camera_port,
         camera_username=camera_username,
         camera_password=camera_password,
         rtsp_path=rtsp_path
@@ -131,6 +138,7 @@ def fetch_camera_config() -> CameraConfig:
     return CameraConfig(
         camera_name=camera_name,
         camera_ip=camera_ip,
+        camera_port=camera_port,
         camera_username=camera_username,
         camera_password=camera_password,
         rtsp_path=rtsp_path,

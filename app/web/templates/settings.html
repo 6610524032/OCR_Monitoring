@@ -41,10 +41,93 @@
         </div>
 
     </div>
+    <!-- =====================================================
+         1. CAMERA SETTINGS
+    ===================================================== -->
+    <div class="card">
 
+        <h2>1. Camera Settings</h2>
+
+        <div class="camera-form">
+
+            <div class="form-group">
+                <label>Camera Name</label>
+                <input
+                    id="cameraName"
+                    type="text"
+                    placeholder="Camera 1"
+                >
+            </div>
+
+            <div class="form-group">
+                <label>IP Address</label>
+                <input
+                    id="cameraIp"
+                    type="text"
+                    placeholder="192.168.1.100"
+                >
+            </div>
+
+            <div class="form-group">
+                <label>Port</label>
+                <input
+                    id="cameraPort"
+                    type="number"
+                    value="554"
+                >
+            </div>
+
+            <div class="form-group">
+                <label>Username</label>
+                <input
+                    id="cameraUsername"
+                    type="text"
+                    placeholder="admin"
+                >
+            </div>
+
+            <div class="form-group">
+                <label>Password</label>
+                <input
+                    id="cameraPassword"
+                    type="password"
+                    placeholder="Password"
+                >
+            </div>
+
+            <div class="form-group">
+                <label>RTSP Path</label>
+                <input
+                    id="cameraRtspPath"
+                    type="text"
+                    placeholder="/cam/realmonitor?channel=1&subtype=0"
+                >
+            </div>
+
+            <div class="button-row">
+
+                <button
+                    id="testCameraBtn"
+                    type="button"
+                >
+                    Test Connection
+                </button>
+
+                <button
+                    id="saveCameraBtn"
+                    type="button"
+                >
+                    Save Camera
+                </button>
+
+            </div>
+
+        </div>
+
+    </div>
 
     <!-- =====================================================
-         1–2. CALIBRATION
+         2-3. CALIBRATION
     ===================================================== -->
 
     <div class="calibration-layout">
@@ -52,7 +135,7 @@
         <!-- LEFT -->
         <div class="card calibration-card calibration-input-card">
 
-            <h2>1. Screen Calibration</h2>
+            <h2>2. Screen Calibration</h2>
 
             <div class="hint">
                 Click all four corners of the HMI screen.
@@ -132,7 +215,7 @@
         <!-- RIGHT -->
         <div class="card calibration-card calibration-result-card">
 
-            <h2>2. Calibration Result</h2>
+            <h2>3. Calibration Result</h2>
 
             {% if latest_calibrated_image %}
 
@@ -175,12 +258,12 @@
 
 
     <!-- =====================================================
-         3. MANUAL ROI SETUP
+         4. MANUAL ROI SETUP
     ===================================================== -->
 
     <div class="card roi-card">
 
-        <h2>3. Manual ROI Setup</h2>
+        <h2>4. Manual ROI Setup</h2>
 
         <div class="roi-toolbar">
             <div class="hint roi-hint">
@@ -262,12 +345,12 @@
 
 
     <!-- =====================================================
-         4. CONFIGURED TAGS
+         5. CONFIGURED TAGS
     ===================================================== -->
 
     <div class="card">
 
-        <h2>4. Configured Tags</h2>
+        <h2>5. Configured Tags</h2>
 
         <div class="table-wrapper">
 

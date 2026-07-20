@@ -1605,3 +1605,166 @@ setInterval(
     checkLatestCalibratedImage,
     10000
 );
+
+/* =====================================================
+   CAMERA SETTINGS
+===================================================== */
+
+const saveCameraBtn =
+    document.getElementById(
+        "saveCameraBtn"
+    );
+
+if (saveCameraBtn) {
+
+    saveCameraBtn.addEventListener(
+        "click",
+        async function () {
+
+            const payload = {
+
+                camera_name:
+                    document.getElementById(
+                        "cameraName"
+                    ).value.trim(),
+
+                camera_ip:
+                    document.getElementById(
+                        "cameraIp"
+                    ).value.trim(),
+
+                camera_port:
+                    parseInt(
+                        document.getElementById(
+                            "cameraPort"
+                        ).value,
+                        10
+                    ) || 554,
+
+                camera_username:
+                    document.getElementById(
+                        "cameraUsername"
+                    ).value.trim(),
+
+                camera_password:
+                    document.getElementById(
+                        "cameraPassword"
+                    ).value,
+
+                rtsp_path:
+                    document.getElementById(
+                        "cameraRtspPath"
+                    ).value.trim()
+            };
+
+            try {
+
+                const response =
+                    await fetch(
+                        "/web_api/api/camera/config",
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify(
+                                payload
+                            )
+                        }
+                    );
+
+                const result =
+                    await response.json();
+
+                if (result.ok) {
+
+                    alert(
+                        "Camera configuration saved."
+                    );
+
+                } else {
+
+                    alert(
+                        result.message ||
+                        "Save failed"
+                    );
+
+                }
+
+            } catch (error) {
+
+                console.error(error);
+
+                alert(
+                    "Cannot save camera configuration."
+                );
+
+            }
+
+        }
+    );
+
+}
+
+
+/* =====================================================
+   LOAD CAMERA CONFIGURATION
+===================================================== */
+
+async function loadCameraConfiguration() {
+
+    try {
+
+        const response =
+            await fetch(
+                "/web_api/api/camera/config"
+            );
+
+        const result =
+            await response.json();
+
+        if (!result.ok) {
+            return;
+        }
+
+        const camera = result.camera;
+
+        document.getElementById(
+            "cameraName"
+        ).value = camera.camera_name || "";
+
+        document.getElementById(
+            "cameraIp"
+        ).value = camera.camera_ip || "";
+
+        document.getElementById(
+            "cameraPort"
+        ).value = camera.camera_port || 554;
+
+        document.getElementById(
+            "cameraUsername"
+        ).value = camera.camera_username || "";
+
+        document.getElementById(
+            "cameraPassword"
+        ).value = camera.camera_password || "";
+
+        document.getElementById(
+            "cameraRtspPath"
+        ).value = camera.rtsp_path || "";
+
+    } catch (error) {
+
+        console.error(
+            "Cannot load camera configuration:",
+            error
+        );
+
+    }
+
+}
+
+loadCameraConfiguration();
