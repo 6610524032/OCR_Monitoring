@@ -92,7 +92,9 @@ def save_ocr_results(
     results,
     status,
     missing_tags,
-    alert_message
+    alert_message,
+    captured_at,
+    capture_timestamp
 ):
     payload = {
         "raw_image_path": str(raw_image_path),
@@ -102,7 +104,9 @@ def save_ocr_results(
         "results": results,
         "status": status,
         "missing_tags": missing_tags,
-        "alert_message": alert_message
+        "alert_message": alert_message,
+        "captured_at": captured_at,
+        "capture_timestamp": capture_timestamp
     }
 
     response = api_post(
@@ -134,7 +138,9 @@ def save_ocr_results(
 def process_ocr_for_tags(
     raw_image_path,
     calibrated_image_path,
-    tags
+    tags,
+    captured_at,
+    capture_timestamp
 ):
     if not tags:
         print(
@@ -161,12 +167,20 @@ def process_ocr_for_tags(
         results=results,
         status=status,
         missing_tags=missing_tags,
-        alert_message=alert_message
+        alert_message=alert_message,
+        captured_at=captured_at,
+        capture_timestamp=capture_timestamp
     )
 
 
-def process_new_image(raw_image_path):
+def process_new_image(
+    raw_image_path,
+    captured_at,
+    capture_timestamp
+):
     print("New image found:", raw_image_path)
+    print("Captured at:", captured_at)
+    print("Capture timestamp:", capture_timestamp)
 
     try:
         worker_config = fetch_worker_config()
@@ -209,7 +223,9 @@ def process_new_image(raw_image_path):
         run_id = process_ocr_for_tags(
             raw_image_path=raw_image_path,
             calibrated_image_path=calibrated_path,
-            tags=tags
+            tags=tags,
+            captured_at=captured_at,
+            capture_timestamp=capture_timestamp
         )
 
     except ApiClientError as error:
@@ -259,10 +275,16 @@ def main():
             capture_rtsp_image()
             last_capture_key = capture_key
 
-        raw_image_path = capture_image()
+        capture_result = capture_image()
 
-        if raw_image_path:
-            process_new_image(raw_image_path)
+        if capture_result:
+            process_new_image(
+                raw_image_path=capture_result["image_path"],
+                captured_at=capture_result["captured_at"],
+                capture_timestamp=(
+                    capture_result["capture_timestamp"]
+                )
+            )
         else:
             print("No new image")
 

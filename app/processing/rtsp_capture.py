@@ -36,13 +36,19 @@ def capture_rtsp_image():
         print("Cannot capture image from RTSP")
         return None
 
-    timestamp = datetime.now().strftime(
-        "%Y-%m-%d_%H-%M-%S"
+    captured_at = datetime.now().astimezone()
+
+    capture_timestamp = int(
+        captured_at.timestamp()
     )
+
+    filename_timestamp = captured_at.strftime(
+        "%Y-%m-%d_%H-%M-%S_%f"
+    )[:-3]
 
     image_path = (
         INCOMING_DIR
-        / f"{timestamp}_rtsp.jpg"
+        / f"{filename_timestamp}_rtsp.jpg"
     )
 
     saved = cv2.imwrite(
@@ -55,8 +61,17 @@ def capture_rtsp_image():
         return None
 
     print(f"RTSP image captured: {image_path}")
+    print(
+        f"Capture timestamp: "
+        f"{capture_timestamp} "
+        f"({captured_at.isoformat()})"
+    )
 
-    return image_path
+    return {
+        "image_path": str(image_path),
+        "captured_at": captured_at.isoformat(),
+        "capture_timestamp": capture_timestamp
+    }
 
 
 if __name__ == "__main__":

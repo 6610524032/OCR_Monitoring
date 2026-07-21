@@ -14,13 +14,45 @@ IMAGE_EXTENSIONS = [
 ]
 
 
+def parse_capture_time_from_filename(filename):
+    filename_stem = filename.rsplit(".", 1)[0]
+
+    timestamp_text = filename_stem.replace(
+        "_rtsp",
+        ""
+    )
+
+    try:
+        captured_at = datetime.strptime(
+            timestamp_text,
+            "%Y-%m-%d_%H-%M-%S_%f"
+        ).astimezone()
+
+    except ValueError:
+        captured_at = datetime.now().astimezone()
+
+    return captured_at
+
+
 def capture_image():
-    INCOMING_DIR.mkdir(parents=True, exist_ok=True)
-    RAW_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    INCOMING_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    RAW_IMAGES_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     image_files = [
-        f for f in INCOMING_DIR.iterdir()
-        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS
+        file_path
+        for file_path in INCOMING_DIR.iterdir()
+        if (
+            file_path.is_file()
+            and file_path.suffix.lower()
+            in IMAGE_EXTENSIONS
+        )
     ]
 
     if not image_files:
@@ -28,21 +60,43 @@ def capture_image():
 
     image_file = min(
         image_files,
-        key=lambda x: x.stat().st_ctime
+        key=lambda path: path.stat().st_ctime
     )
 
-    date_folder = datetime.now().strftime("%Y-%m-%d")
-    target_folder = RAW_IMAGES_DIR / date_folder
-    target_folder.mkdir(parents=True, exist_ok=True)
+    captured_at = parse_capture_time_from_filename(
+        image_file.name
+    )
 
-    timestamp = datetime.now().strftime("%H-%M-%S")
-    new_name = f"{timestamp}_{image_file.name}"
+    capture_timestamp = int(
+        captured_at.timestamp()
+    )
 
-    target_path = target_folder / new_name
+    date_folder = captured_at.strftime(
+        "%Y-%m-%d"
+    )
+
+    target_folder = (
+        RAW_IMAGES_DIR
+        / date_folder
+    )
+
+    target_folder.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    target_path = (
+        target_folder
+        / image_file.name
+    )
 
     shutil.move(
         str(image_file),
         str(target_path)
     )
 
-    return str(target_path)
+    return {
+        "image_path": str(target_path),
+        "captured_at": captured_at.isoformat(),
+        "capture_timestamp": capture_timestamp
+    }
