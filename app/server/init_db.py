@@ -40,6 +40,8 @@ def init_database():
                 unit TEXT,
                 display_order INTEGER DEFAULT 0,
 
+                sensor_api_key TEXT,
+
                 roi_x1 REAL NOT NULL,
                 roi_y1 REAL NOT NULL,
                 roi_x2 REAL NOT NULL,
@@ -51,6 +53,18 @@ def init_database():
                 updated_at TEXT
             )
         """)
+
+        cur.execute("PRAGMA table_info(user_tags)")
+        user_tag_columns = {
+            row[1]
+            for row in cur.fetchall()
+        }
+
+        if "sensor_api_key" not in user_tag_columns:
+            cur.execute("""
+                ALTER TABLE user_tags
+                ADD COLUMN sensor_api_key TEXT
+            """)
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS camera (

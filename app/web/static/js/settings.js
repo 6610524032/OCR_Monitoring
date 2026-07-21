@@ -1306,6 +1306,7 @@ function finishBox() {
         value: "Reading...",
         tag_name: "",
         unit: "",
+        sensor_api_key: "",
         status: "pending"
     };
 
@@ -1475,6 +1476,17 @@ function updateRoiTable() {
                 </td>
 
                 <td>
+                    <input
+                        type="text"
+                        value="${escapeHtml(box.sensor_api_key)}"
+                        data-box-id="${box.id}"
+                        data-field="sensor_api_key"
+                        placeholder="API Key"
+                        autocomplete="off"
+                    >
+                </td>
+
+                <td>
                     <button
                         type="button"
                         class="delete-btn"
@@ -1617,6 +1629,9 @@ if (saveAllBtn) {
 
                     unit:
                         box.unit.trim(),
+
+                    sensor_api_key:
+                        box.sensor_api_key.trim(),
 
                     x1: box.x1,
                     y1: box.y1,

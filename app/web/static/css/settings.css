@@ -625,6 +625,11 @@ td{
 
 #roiTable th:nth-child(5),
 #roiTable td:nth-child(5){
+    width:260px;
+}
+
+#roiTable th:nth-child(6),
+#roiTable td:nth-child(6){
     width:70px;
 }
 
