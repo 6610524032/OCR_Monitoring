@@ -106,7 +106,6 @@ def save_ocr_results(
         "missing_tags": missing_tags,
         "alert_message": alert_message,
         "captured_at": captured_at,
-        "capture_timestamp": capture_timestamp
     }
 
     response = api_post(
@@ -286,7 +285,7 @@ def main():
                 )
             )
         else:
-            print("No new image")
+            print("No new image")    
 
         time.sleep(PROCESS_CHECK_INTERVAL)
 

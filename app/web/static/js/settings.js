@@ -445,6 +445,135 @@ if (resetBtn) {
     );
 }
 
+const saveBtn =
+    document.getElementById("saveBtn");
+
+if (saveBtn) {
+    saveBtn.addEventListener(
+        "click",
+        async function () {
+            if (sortedPoints.length !== 4) {
+                alert(
+                    "กรุณาเลือกจุด Calibration ให้ครบ 4 จุด"
+                );
+                return;
+            }
+
+            if (!hmiImage) {
+                alert(
+                    "ไม่พบภาพสำหรับ Calibration"
+                );
+                return;
+            }
+
+            const imageName =
+                hmiImage.dataset.currentImage;
+
+            if (!imageName) {
+                alert(
+                    "ไม่พบชื่อภาพสำหรับ Calibration"
+                );
+                return;
+            }
+
+            const originalText =
+                saveBtn.innerText;
+
+            saveBtn.disabled = true;
+            saveBtn.innerText =
+                "Saving...";
+
+            const payload = {
+                image_path: imageName,
+                points: sortedPoints.map(
+                    function (point) {
+                        return {
+                            x: point.realX,
+                            y: point.realY
+                        };
+                    }
+                )
+            };
+
+            try {
+                const response =
+                    await fetch(
+                        "/web_api/api/save_calibration",
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+                            body: JSON.stringify(
+                                payload
+                            )
+                        }
+                    );
+
+                const result =
+                    await response.json();
+
+                if (!response.ok || !result.ok) {
+                    throw new Error(
+                        result.message ||
+                        "Save calibration failed."
+                    );
+                }
+
+                const previewResponse =
+                await fetch(
+                    "/web_api/api/test_calibration",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                const previewResult =
+                    await previewResponse.json();
+
+                if (
+                    !previewResponse.ok ||
+                    !previewResult.ok
+                ) {
+                        throw new Error(
+                            previewResult.message ||
+                            "Cannot create calibration preview."
+                        );
+                }
+
+                await checkLatestCalibratedImage();
+
+                alert(
+                    "Save Calibration สำเร็จ"
+                );
+
+                rawPoints = [];
+                sortedPoints = [];
+
+                updatePointText();
+
+            } catch (error) {
+                console.error(
+                    "Save calibration error:",
+                    error
+                );
+
+                alert(
+                    error.message ||
+                    "Save calibration failed."
+                );
+
+            } finally {
+                saveBtn.innerText =
+                    originalText;
+
+                saveBtn.disabled =
+                    rawPoints.length !== 4;
+            }
+        }
+    );
+}
 
 const captureImageBtn =
     document.getElementById(

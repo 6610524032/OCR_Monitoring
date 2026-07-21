@@ -38,7 +38,7 @@ INCOMING_DIR = DATA_DIR / "incoming"
 PROCESS_CHECK_INTERVAL = 5
 
 RTSP_CAPTURE_ENABLED = True
-RTSP_CAPTURE_MINUTES = [0]
+RTSP_CAPTURE_MINUTES = list(range(60))
 
 # =====================================================
 # API SECURITY

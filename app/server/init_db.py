@@ -91,6 +91,7 @@ def init_database():
                 raw_image_path TEXT,
                 calibrated_image_path TEXT,
 
+                captured_at TEXT,
                 ocr_time TEXT,
 
                 status TEXT DEFAULT 'NORMAL',
@@ -102,6 +103,18 @@ def init_database():
                 created_at TEXT
             )
         """)
+
+        cur.execute("PRAGMA table_info(ocr_runs)")
+        ocr_run_columns = {
+            row[1]
+            for row in cur.fetchall()
+        }
+
+        if "captured_at" not in ocr_run_columns:
+            cur.execute("""
+                ALTER TABLE ocr_runs
+                ADD COLUMN captured_at TEXT
+            """)
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS ocr_values (

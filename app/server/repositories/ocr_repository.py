@@ -87,7 +87,8 @@ def save_worker_ocr_run(
     results,
     status,
     missing_tags,
-    alert_message
+    alert_message,
+    captured_at
 ):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -110,9 +111,10 @@ def save_worker_ocr_run(
                 review_status,
                 missing_tags,
                 alert_message,
+                captured_at,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             to_relative_path(raw_image_path),
             to_relative_path(calibrated_image_path),
@@ -121,6 +123,7 @@ def save_worker_ocr_run(
             review_status,
             ",".join(missing_tags),
             alert_message,
+            captured_at,
             now
         ))
 

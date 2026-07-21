@@ -1,3 +1,4 @@
+from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from app.processing.trocr_engine import read_manual_roi
@@ -83,6 +84,10 @@ def api_worker_create_ocr_run():
         data.get("alert_message", "")
     ).strip()
 
+    captured_at = str(
+        data.get("captured_at", "")
+    ).strip()
+
     if not raw_image_path:
         return jsonify({
             "ok": False,
@@ -94,6 +99,34 @@ def api_worker_create_ocr_run():
             "ok": False,
             "message": "calibrated_image_path is required"
         }), 400
+
+    if not captured_at:
+        return jsonify({
+            "ok": False,
+            "message": "captured_at is required"
+        }), 400
+
+    try:
+        parsed_captured_at = datetime.fromisoformat(
+            captured_at
+        )
+
+    except ValueError:
+        return jsonify({
+            "ok": False,
+            "message": (
+                "captured_at must be a valid "
+                "ISO 8601 datetime"
+            )
+        }), 400
+    if parsed_captured_at.tzinfo is None:
+        return jsonify({
+            "ok": False,
+            "message": (
+                "captured_at must include "
+                "a timezone offset"
+            )
+        }), 400 
 
     if not isinstance(results, list) or not results:
         return jsonify({
@@ -151,7 +184,8 @@ def api_worker_create_ocr_run():
                 str(tag_name)
                 for tag_name in missing_tags
             ],
-            alert_message=alert_message
+            alert_message=alert_message,
+            captured_at=captured_at
         )
 
     except Exception as error:

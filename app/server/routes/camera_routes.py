@@ -179,13 +179,35 @@ def api_capture_image():
 
     try:
 
-        image_path = capture_rtsp_image()
+        capture_result = capture_rtsp_image()
 
-        if image_path is None:
+        if capture_result is None:
 
             return jsonify({
                 "ok": False,
                 "message": "Cannot capture image."
+            }), 500
+
+        image_path = capture_result.get(
+            "image_path"
+        )
+
+        captured_at = capture_result.get(
+            "captured_at"
+        )
+
+        capture_timestamp = capture_result.get(
+            "capture_timestamp"
+        )
+
+        if not image_path:
+
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Capture result does not contain "
+                    "an image path."
+                )
             }), 500
 
         return jsonify({
@@ -193,6 +215,10 @@ def api_capture_image():
             "ok": True,
 
             "image": Path(image_path).name,
+
+            "captured_at": captured_at,
+
+            "capture_timestamp": capture_timestamp,
 
             "message": "Image captured successfully."
 
