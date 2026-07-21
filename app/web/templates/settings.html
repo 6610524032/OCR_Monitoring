@@ -169,14 +169,25 @@
 
         </div>
 
-        {% if latest_image %}
-
-        <div class="image-container calibration-image-container">
+        <div
+            class="image-container calibration-image-container"
+            id="rawImageContainer"
+            {% if not latest_image %}
+                style="display: none;"
+            {% endif %}
+        >
 
             <img
                 id="hmiImage"
-                src="/raw_images/{{ latest_image }}"
-                data-current-image="{{ latest_image }}"
+
+                {% if latest_image %}
+                    src="/raw_images/{{ latest_image }}"
+                    data-current-image="{{ latest_image }}"
+                {% else %}
+                    src=""
+                    data-current-image=""
+                {% endif %}
+
                 alt="Raw HMI screen"
                 draggable="false"
             >
@@ -185,14 +196,21 @@
 
         </div>
 
-        <p class="image-path-row">
+        <p
+            class="image-path-row"
+            id="imagePathRow"
+            {% if not latest_image %}
+                style="display: none;"
+            {% endif %}
+        >
             <b>Raw Image:</b>
+
             <span id="imagePath">
-                {{ latest_image }}
+                {% if latest_image %}
+                    {{ latest_image }}
+                {% endif %}
             </span>
         </p>
-
-        {% endif %}
 
         <div class="points">
 
@@ -225,40 +243,57 @@
 
         <h2>3. Calibration Result</h2>
 
-        {% if latest_calibrated_image %}
-
         <p
             id="testStatus"
-            class="calibration-status calibration-ready"
+            class="
+                calibration-status
+                {% if latest_calibrated_image %}
+                    calibration-ready
+                {% else %}
+                    calibration-not-ready
+                {% endif %}
+            "
         >
-            ✅ Calibration Ready
+            {% if latest_calibrated_image %}
+                ✅ Calibration Ready
+            {% else %}
+                ❌ Calibration Not Ready
+            {% endif %}
         </p>
 
-        <div class="result-image-container">
+        <div
+            class="result-image-container"
+            id="calibratedResultContainer"
+            {% if not latest_calibrated_image %}
+                style="display: none;"
+            {% endif %}
+        >
 
             <img
                 id="calibratedPreview"
-                src="/calibrated_images/{{ latest_calibrated_image }}"
-                data-current-image="{{ latest_calibrated_image }}"
+
+                {% if latest_calibrated_image %}
+                    src="/calibrated_images/{{ latest_calibrated_image }}"
+                    data-current-image="{{ latest_calibrated_image }}"
+                {% else %}
+                    src=""
+                    data-current-image=""
+                {% endif %}
+
                 alt="Calibrated HMI screen"
             >
 
         </div>
 
-        {% else %}
-
-        <p
-            id="testStatus"
-            class="calibration-status calibration-not-ready"
+        <div
+            class="result-placeholder"
+            id="calibratedPlaceholder"
+            {% if latest_calibrated_image %}
+                style="display: none;"
+            {% endif %}
         >
-            ❌ Calibration Not Ready
-        </p>
-
-        <div class="result-placeholder">
             Calibration result will appear here.
         </div>
-
-        {% endif %}
 
     </div>
 
@@ -273,80 +308,122 @@
         <h2>4. Manual ROI Setup</h2>
 
         <div class="roi-toolbar">
+
             <div class="hint roi-hint">
                 Click "Draw ROI" and drag a rectangle around the numbers
                 you want to detect. The system will create IDs such as
                 No.01 and No.02.
             </div>
 
-            {% if latest_calibrated_image %}
-            <button id="drawRoiBtn" type="button">
+            <button
+                id="drawRoiBtn"
+                type="button"
+                {% if not latest_calibrated_image %}
+                    style="display: none;"
+                {% endif %}
+            >
                 Draw ROI
             </button>
+
+        </div>
+
+        <p
+            id="roiNotReadyMessage"
+            {% if latest_calibrated_image %}
+                style="display: none;"
             {% endif %}
-        </div>
+        >
+            Please save the calibration before setting up ROIs.
+        </p>
 
-        {% if latest_calibrated_image %}
+        <div
+            id="roiSetupContent"
+            {% if not latest_calibrated_image %}
+                style="display: none;"
+            {% endif %}
+        >
 
-        <div class="status-box roi-status-box">
-            <span>
-                <b>Mode:</b>
-                <span id="modeText">Draw Mode OFF</span>
-            </span>
+            <div class="status-box roi-status-box">
 
-            <span class="status-divider">|</span>
+                <span>
+                    <b>Mode:</b>
+                    <span id="modeText">
+                        Draw Mode OFF
+                    </span>
+                </span>
 
-            <span>
-                <b>Total ROI:</b>
-                <span id="roiCount">0</span>
-            </span>
-        </div>
+                <span class="status-divider">|</span>
 
-        <div class="setup-layout">
+                <span>
+                    <b>Total ROI:</b>
+                    <span id="roiCount">0</span>
+                </span>
 
-            <div class="roi-image-panel">
-                <div class="image-container roi-image-container">
-                    <img
-                        id="roiImage"
-                        src="/calibrated_images/{{ latest_calibrated_image }}"
-                        data-current-image="{{ latest_calibrated_image }}"
-                        alt="ROI setup image"
-                        draggable="false"
+            </div>
+
+            <div class="setup-layout">
+
+                <div class="roi-image-panel">
+
+                    <div class="image-container roi-image-container">
+
+                        <img
+                            id="roiImage"
+
+                            {% if latest_calibrated_image %}
+                                src="/calibrated_images/{{ latest_calibrated_image }}"
+                                data-current-image="{{ latest_calibrated_image }}"
+                            {% else %}
+                                src=""
+                                data-current-image=""
+                            {% endif %}
+
+                            alt="ROI setup image"
+                            draggable="false"
+                        >
+
+                        <canvas id="roiCanvas"></canvas>
+
+                    </div>
+
+                </div>
+
+                <div class="roi-queue-panel">
+
+                    <h3>ROI Queue</h3>
+
+                    <div class="table-wrapper roi-table-wrapper">
+
+                        <table id="roiTable">
+
+                            <thead>
+                                <tr>
+                                    <th>No.</th>
+                                    <th>OCR Value</th>
+                                    <th>Tag Name</th>
+                                    <th>Unit</th>
+                                    <th>Delete</th>
+                                </tr>
+                            </thead>
+
+                            <tbody></tbody>
+
+                        </table>
+
+                    </div>
+
+                    <button
+                        id="saveAllBtn"
+                        type="button"
                     >
-                    <canvas id="roiCanvas"></canvas>
-                </div>
-            </div>
+                        Save All Tags
+                    </button>
 
-            <div class="roi-queue-panel">
-                <h3>ROI Queue</h3>
-
-                <div class="table-wrapper roi-table-wrapper">
-                    <table id="roiTable">
-                        <thead>
-                            <tr>
-                                <th>No.</th>
-                                <th>OCR Value</th>
-                                <th>Tag Name</th>
-                                <th>Unit</th>
-                                <th>Delete</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
                 </div>
 
-                <button id="saveAllBtn" type="button">
-                    Save All Tags
-                </button>
             </div>
 
         </div>
-
-        {% else %}
-
-        <p>Please save the calibration before setting up ROIs.</p>
-
-        {% endif %}
 
     </div>
 

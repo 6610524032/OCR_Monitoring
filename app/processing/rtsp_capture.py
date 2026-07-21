@@ -6,11 +6,23 @@ from app.server.camera_client import (
     CameraConfigError,
     get_camera_config
 )
-from app.server.config import INCOMING_DIR
+from app.server.config import RAW_IMAGES_DIR
 
 
 def capture_rtsp_image():
-    INCOMING_DIR.mkdir(
+
+    captured_at = datetime.now().astimezone()
+
+    date_folder = captured_at.strftime(
+        "%Y-%m-%d"
+    )
+
+    save_dir = (
+        RAW_IMAGES_DIR
+        / date_folder
+    )
+
+    save_dir.mkdir(
         parents=True,
         exist_ok=True
     )
@@ -30,13 +42,12 @@ def capture_rtsp_image():
     )
 
     success, frame = cap.read()
+
     cap.release()
 
     if not success:
         print("Cannot capture image from RTSP")
         return None
-
-    captured_at = datetime.now().astimezone()
 
     capture_timestamp = int(
         captured_at.timestamp()
@@ -47,7 +58,7 @@ def capture_rtsp_image():
     )[:-3]
 
     image_path = (
-        INCOMING_DIR
+        save_dir
         / f"{filename_timestamp}_rtsp.jpg"
     )
 
@@ -60,7 +71,10 @@ def capture_rtsp_image():
         print("Cannot save RTSP image")
         return None
 
-    print(f"RTSP image captured: {image_path}")
+    print(
+        f"RTSP image captured: {image_path}"
+    )
+
     print(
         f"Capture timestamp: "
         f"{capture_timestamp} "

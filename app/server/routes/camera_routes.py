@@ -12,6 +12,7 @@ from app.processing.rtsp_capture import (
     capture_rtsp_image
 )
 
+from app.server.config import RAW_IMAGES_DIR
 camera_bp = Blueprint(
     "camera",
     __name__
@@ -178,30 +179,21 @@ def api_test_camera():
 def api_capture_image():
 
     try:
-
         capture_result = capture_rtsp_image()
 
         if capture_result is None:
-
             return jsonify({
                 "ok": False,
                 "message": "Cannot capture image."
             }), 500
 
-        image_path = capture_result.get(
-            "image_path"
-        )
-
-        captured_at = capture_result.get(
-            "captured_at"
-        )
-
+        image_path = capture_result.get("image_path")
+        captured_at = capture_result.get("captured_at")
         capture_timestamp = capture_result.get(
             "capture_timestamp"
         )
 
         if not image_path:
-
             return jsonify({
                 "ok": False,
                 "message": (
@@ -210,18 +202,59 @@ def api_capture_image():
                 )
             }), 500
 
+        image_path_obj = Path(image_path).resolve()
+
+        if not image_path_obj.exists():
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Captured image file does not exist: "
+                    + str(image_path_obj)
+                )
+            }), 500
+
+        raw_images_dir = Path(
+            RAW_IMAGES_DIR
+        ).resolve()
+
+        try:
+            relative_image_path = (
+                image_path_obj
+                .relative_to(raw_images_dir)
+                .as_posix()
+            )
+
+        except ValueError:
+            date_folder = image_path_obj.parent.name
+
+            relative_image_path = (
+                date_folder
+                + "/"
+                + image_path_obj.name
+            )
+
+        image_url = (
+            "/raw_images/"
+            + relative_image_path
+        )
+
+        print(
+            "Captured image path:",
+            image_path_obj
+        )
+
+        print(
+            "Captured image URL:",
+            image_url
+        )
+
         return jsonify({
-
             "ok": True,
-
-            "image": Path(image_path).name,
-
+            "image": relative_image_path,
+            "image_url": image_url,
             "captured_at": captured_at,
-
             "capture_timestamp": capture_timestamp,
-
             "message": "Image captured successfully."
-
         })
 
     except Exception as error:
@@ -232,9 +265,6 @@ def api_capture_image():
         )
 
         return jsonify({
-
             "ok": False,
-
             "message": str(error)
-
         }), 500

@@ -542,7 +542,17 @@ if (saveBtn) {
                         );
                 }
 
-                await checkLatestCalibratedImage();
+                const refreshed =
+                    await checkLatestCalibratedImage(
+                        true
+
+                    );
+
+                if (!refreshed) {
+                    throw new Error(
+                        "Calibration saved, but the Manual ROI image could not be loaded."
+                    );
+                }
 
                 alert(
                     "Save Calibration สำเร็จ"
@@ -606,6 +616,27 @@ function loadRawImageImmediately(
         }
 
         hmiImage.onload = function () {
+
+            const rawImageContainer =
+                document.getElementById(
+                    "rawImageContainer"
+                );
+
+            const imagePathRow =
+                document.getElementById(
+                    "imagePathRow"
+                );
+
+            if (rawImageContainer) {
+                rawImageContainer.style.display = "";
+            }
+
+            if (imagePathRow) {
+                imagePathRow.style.display = "";
+            }
+
+            hmiImage.style.display = "";
+
             drawCtx =
                 setupCanvasForImage(
                     hmiImage,
@@ -614,7 +645,7 @@ function loadRawImageImmediately(
 
             drawCalibrationPoints();
 
-            resolve();
+            resolve(true);
         };
 
         hmiImage.onerror = function () {
@@ -628,9 +659,15 @@ function loadRawImageImmediately(
         hmiImage.dataset.currentImage =
             imageName;
 
+        const separator =
+            imageUrl.includes("?")
+                ? "&"
+                : "?";
+
         hmiImage.src =
             imageUrl +
-            "?t=" +
+            separator +
+            "t=" +
             Date.now();
     });
 }
@@ -741,15 +778,28 @@ if (captureImageBtn) {
                 captureImageBtn.innerText =
                     "Loading image...";
 
-                const imageLoaded =
-                    await refreshCapturedImage(
-                        result.image
+                if (
+                    !result.image ||
+                    !result.image_url
+                ) {
+                    throw new Error(
+                        "Capture response does not contain image information."
+                    );
+                }
+
+                await loadRawImageImmediately(
+                    result.image_url,
+                    result.image
+                );
+
+                const imagePathElement =
+                    document.getElementById(
+                        "imagePath"
                     );
 
-                if (!imageLoaded) {
-                    throw new Error(
-                        "Captured image was not available in time."
-                    );
+                if (imagePathElement) {
+                    imagePathElement.innerText =
+                        result.image;
                 }
 
                 /*
@@ -766,6 +816,7 @@ if (captureImageBtn) {
                 );
 
                 alert(
+                    error.message ||
                     "Cannot capture or load image."
                 );
 
@@ -1675,77 +1726,198 @@ async function checkLatestRawImage() {
 }
 
 
-async function checkLatestCalibratedImage() {
-    if (!roiImage) {
-        return;
-    }
+async function checkLatestCalibratedImage(
+    forceRefresh = false
+) {
+    const preview =
+        document.getElementById(
+            "calibratedPreview"
+        );
 
-    if (manualBoxes.length > 0) {
-        return;
-    }
+    const roiSetupImage =
+        document.getElementById(
+            "roiImage"
+        );
+
+    const placeholder =
+        document.getElementById(
+            "calibratedPlaceholder"
+        );
+
+    const resultContainer =
+        document.getElementById(
+            "calibratedResultContainer"
+        );
+
+    const status =
+        document.getElementById(
+            "testStatus"
+        );
 
     try {
         const response = await fetch(
-            "/web_api/api/latest_calibrated_image"
+            "/web_api/api/latest_calibrated_image?t=" +
+            Date.now(),
+            {
+                cache: "no-store"
+            }
         );
 
         const result =
             await response.json();
 
         if (
+            !response.ok ||
             !result.ok ||
-            !result.image
+            !result.image ||
+            !result.image_url
         ) {
-            return;
+            return false;
         }
-
-        if (
-            roiImage.dataset.currentImage ===
-            result.image
-        ) {
-            return;
-        }
-
-        roiImage.dataset.currentImage =
-            result.image;
-
-        roiImage.onload = function () {
-            roiCtx =
-                setupCanvasForImage(
-                    roiImage,
-                    roiCanvas
-                );
-
-            drawRoiCanvas();
-        };
 
         const cacheKey =
-            "?t=" +
-            new Date().getTime();
+            result.image_url.includes("?")
+                ? "&t=" + Date.now()
+                : "?t=" + Date.now();
 
-        roiImage.src =
+        const newImageUrl =
             result.image_url +
             cacheKey;
 
-        const preview =
-            document.getElementById(
-                "calibratedPreview"
-            );
-
+        /*
+        อัปเดตภาพข้อ 3:
+        Calibration Result
+        */
         if (preview) {
-            preview.src =
-                result.image_url +
-                cacheKey;
+            await new Promise(function (
+                resolve,
+                reject
+            ) {
+                preview.onload = function () {
+                    preview.style.display = "";
+
+                    if (placeholder) {
+                        placeholder.style.display =
+                            "none";
+                    }
+
+                    if (resultContainer) {
+                        resultContainer.style.display =
+                            "";
+                    }
+
+                    if (status) {
+                        status.innerText =
+                            "✅ Calibration Ready";
+
+                        status.classList.remove(
+                            "calibration-not-ready"
+                        );
+
+                        status.classList.add(
+                            "calibration-ready"
+                        );
+                    }
+
+                    preview.dataset.currentImage =
+                        result.image;
+
+                    resolve(true);
+                };
+
+                preview.onerror = function () {
+                    reject(
+                        new Error(
+                            "Cannot load Calibration Result image."
+                        )
+                    );
+                };
+
+                preview.src = newImageUrl;
+            });
         }
+
+        /*
+            อัปเดตภาพข้อ 4:
+            Manual ROI Setup
+        */
+        if (roiSetupImage) {
+            const roiSetupContent =
+                document.getElementById(
+                    "roiSetupContent"
+                );
+
+            const roiNotReadyMessage =
+                document.getElementById(
+                    "roiNotReadyMessage"
+                );
+
+            const drawRoiButton =
+                document.getElementById(
+                    "drawRoiBtn"
+                );
+
+            roiSetupImage.dataset.currentImage =
+                result.image;
+
+            await new Promise(function (
+                resolve,
+                reject
+            ) {
+                roiSetupImage.onload = function () {
+                    roiSetupImage.style.display =
+                        "";
+
+                    if (roiSetupContent) {
+                        roiSetupContent.style.display =
+                            "";
+                    }
+
+                    if (roiNotReadyMessage) {
+                        roiNotReadyMessage.style.display =
+                            "none";
+                    }
+
+                    if (drawRoiButton) {
+                        drawRoiButton.style.display =
+                            "";
+                    }
+
+                    roiCtx =
+                        setupCanvasForImage(
+                            roiSetupImage,
+                            roiCanvas
+                        );
+
+                    drawRoiCanvas();
+
+                    resolve(true);
+                };
+
+                roiSetupImage.onerror = function () {
+                    reject(
+                        new Error(
+                            "Cannot load Manual ROI image."
+                        )
+                    );
+                };
+
+                roiSetupImage.src =
+                    newImageUrl;
+            });
+        }
+
+        return true;
+
     } catch (error) {
         console.error(
             "Latest calibrated image error:",
             error
         );
+
+        return false;
     }
 }
-
-
 /* =====================================================
    RESIZE HANDLING
 ===================================================== */
