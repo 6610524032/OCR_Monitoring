@@ -15,6 +15,9 @@ from app.server.api_client import (
     api_get,
     api_post
 )
+from app.server.integrations.vulcan_client import (
+    send_sensor_values_to_vulcan
+)
 from app.server.config import (
     PROCESS_CHECK_INTERVAL,
     RTSP_CAPTURE_ENABLED,
@@ -85,6 +88,38 @@ def get_run_status(missing_tags):
 
     return "NORMAL", ""
 
+def build_vulcan_sensor_values(
+    results,
+    capture_timestamp
+):
+    sensor_values = []
+
+    for result in results:
+        tag = result["tag"]
+
+        api_key = str(
+            tag.get("sensor_api_key", "")
+        ).strip()
+
+        if not api_key:
+            continue
+
+        value = str(
+            result.get("value", "")
+        ).strip()
+
+        try:
+            numeric_value = float(value)
+        except ValueError:
+            continue
+
+        sensor_values.append({
+            "sensor_api_key": api_key,
+            "capture_timestamp": capture_timestamp,
+            "value": numeric_value
+        })
+
+    return sensor_values
 
 def save_ocr_results(
     raw_image_path,
@@ -160,7 +195,7 @@ def process_ocr_for_tags(
         missing_tags
     )
 
-    return save_ocr_results(
+    run_id = save_ocr_results(
         raw_image_path=raw_image_path,
         calibrated_image_path=calibrated_image_path,
         results=results,
@@ -171,6 +206,33 @@ def process_ocr_for_tags(
         capture_timestamp=capture_timestamp
     )
 
+    sensor_values = build_vulcan_sensor_values(
+        results=results,
+        capture_timestamp=capture_timestamp
+    )
+
+    print(
+        "Prepared",
+        len(sensor_values),
+        "sensor value(s) for Vulcan"
+    )
+
+    if not sensor_values:
+        print(
+            "[VULCAN] No valid sensor values to send"
+        )
+        return run_id
+
+    vulcan_result = send_sensor_values_to_vulcan(
+        sensor_values
+    )
+
+    print(
+        "[VULCAN]",
+        vulcan_result
+    )
+
+    return run_id
 
 def process_new_image(
     raw_image_path,
