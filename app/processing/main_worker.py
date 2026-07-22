@@ -1,11 +1,19 @@
 import time
 from datetime import datetime
+from threading import Thread
 
 import cv2
 
-from app.processing.calibration import create_calibrated_image
+from app.processing.calibration import (
+    create_calibrated_image
+)
 from app.processing.capture import capture_image
-from app.processing.rtsp_capture import capture_rtsp_image
+from app.processing.rtsp_capture import (
+    capture_rtsp_image
+)
+from app.processing.sender_worker import (
+    sender_loop
+)
 from app.processing.trocr_engine import (
     crop_by_roi,
     read_crop_with_trocr
@@ -14,9 +22,6 @@ from app.server.api_client import (
     ApiClientError,
     api_get,
     api_post
-)
-from app.server.integrations.vulcan_client import (
-    send_sensor_values_to_vulcan
 )
 from app.server.config import (
     PROCESS_CHECK_INTERVAL,
@@ -114,6 +119,8 @@ def build_vulcan_sensor_values(
             continue
 
         sensor_values.append({
+            "tag_id": tag["id"],
+            "tag_name": tag["tag_name"],
             "sensor_api_key": api_key,
             "capture_timestamp": capture_timestamp,
             "value": numeric_value
@@ -167,6 +174,41 @@ def save_ocr_results(
         print(alert_message)
 
     return run_id
+
+
+def create_outbound_queue(
+    run_id,
+    sensor_values
+):
+    payload = {
+        "run_id": run_id,
+        "sensor_values": sensor_values
+    }
+
+    response = api_post(
+        "/api/worker/outbound-queue",
+        payload=payload
+    )
+
+    if not response.get("ok"):
+        raise ApiClientError(
+            response.get(
+                "message",
+                "Cannot create outbound queue"
+            )
+        )
+
+    queue_ids = response.get(
+        "queue_ids",
+        []
+    )
+
+    print(
+        f"Created {len(queue_ids)} "
+        "queue item(s)"
+    )
+
+    return queue_ids
 
 
 def process_ocr_for_tags(
@@ -223,13 +265,14 @@ def process_ocr_for_tags(
         )
         return run_id
 
-    vulcan_result = send_sensor_values_to_vulcan(
-        sensor_values
+    queue_ids = create_outbound_queue(
+        run_id=run_id,
+        sensor_values=sensor_values
     )
 
     print(
-        "[VULCAN]",
-        vulcan_result
+        "[QUEUE]",
+        queue_ids
     )
 
     return run_id
@@ -325,6 +368,15 @@ def main():
     print("Waiting for images in data/incoming/")
     print("Press Ctrl + C to stop")
 
+    sender_thread = Thread(
+        target=sender_loop,
+        name="VulcanSenderWorker",
+        daemon=True
+    )
+    sender_thread.start()
+
+    print("Vulcan Sender Worker Started")
+
     last_capture_key = None
 
     while True:
@@ -348,7 +400,6 @@ def main():
             )
         else:
             print("No new image")    
-
         time.sleep(PROCESS_CHECK_INTERVAL)
 
 

@@ -17,6 +17,12 @@ from app.server.repositories.ocr_repository import (
 from app.server.repositories.tag_repository import (
     get_active_user_tags
 )
+from app.server.repositories.queue_repository import (
+    claim_pending_queue,
+    create_queue_items,
+    mark_queue_failed,
+    mark_queue_sent
+)
 worker_bp = Blueprint(
     "worker",
     __name__
@@ -126,7 +132,7 @@ def api_worker_create_ocr_run():
                 "captured_at must include "
                 "a timezone offset"
             )
-        }), 400 
+        }), 400
 
     if not isinstance(results, list) or not results:
         return jsonify({
@@ -205,3 +211,232 @@ def api_worker_create_ocr_run():
         "message": "OCR run saved",
         "run_id": run_id
     }), 201
+
+
+@worker_bp.route(
+    "/api/worker/outbound-queue",
+    methods=["POST"]
+)
+@require_api_key
+def api_create_outbound_queue():
+    data = request.get_json(
+        silent=True
+    )
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "ok": False,
+            "message": (
+                "JSON request body is required"
+            )
+        }), 400
+
+    run_id = data.get("run_id")
+    sensor_values = data.get(
+        "sensor_values"
+    )
+
+    if not run_id:
+        return jsonify({
+            "ok": False,
+            "message": (
+                "run_id is required"
+            )
+        }), 400
+
+    if not isinstance(
+        sensor_values,
+        list
+    ):
+        return jsonify({
+            "ok": False,
+            "message": (
+                "sensor_values must be a list"
+            )
+        }), 400
+
+    try:
+        queue_ids = create_queue_items(
+            run_id=run_id,
+            sensor_values=sensor_values
+        )
+
+    except Exception as error:
+        print(
+            "[QUEUE ERROR]",
+            type(error).__name__,
+            str(error)
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Cannot create outbound queue"
+            )
+        }), 500
+
+    return jsonify({
+        "ok": True,
+        "message": (
+            "Outbound queue created"
+        ),
+        "queue_ids": queue_ids
+    }), 201
+
+
+@worker_bp.route(
+    "/api/worker/outbound-queue/claim",
+    methods=["POST"]
+)
+@require_api_key
+def api_claim_outbound_queue():
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+    limit = data.get(
+        "limit",
+        100
+    )
+
+    try:
+        queue_items = claim_pending_queue(
+            limit=int(limit)
+        )
+
+    except Exception as error:
+        print(
+            "[QUEUE CLAIM ERROR]",
+            type(error).__name__,
+            str(error)
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": "Cannot claim queue"
+        }), 500
+
+    return jsonify({
+        "ok": True,
+        "queue_items": queue_items
+    })
+
+
+@worker_bp.route(
+    "/api/worker/outbound-queue/sent",
+    methods=["POST"]
+)
+@require_api_key
+def api_mark_queue_sent():
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+    queue_ids = data.get(
+        "queue_ids",
+        []
+    )
+
+    if not isinstance(queue_ids, list):
+        return jsonify({
+            "ok": False,
+            "message": (
+                "queue_ids must be a list"
+            )
+        }), 400
+
+    http_status = data.get(
+        "http_status"
+    )
+
+    response_message = data.get(
+        "response_message",
+        ""
+    )
+
+    try:
+        updated = mark_queue_sent(
+            queue_ids=queue_ids,
+            http_status=http_status,
+            response_message=response_message
+        )
+
+    except Exception as error:
+        print(
+            "[QUEUE SENT ERROR]",
+            type(error).__name__,
+            str(error)
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": "Cannot update queue"
+        }), 500
+
+    return jsonify({
+        "ok": True,
+        "updated": updated
+    })
+    
+
+@worker_bp.route(
+    "/api/worker/outbound-queue/failed",
+    methods=["POST"]
+)
+@require_api_key
+def api_mark_queue_failed():
+    data = request.get_json(
+        silent=True
+    ) or {}
+
+    queue_ids = data.get(
+        "queue_ids",
+        []
+    )
+
+    if not isinstance(queue_ids, list):
+        return jsonify({
+            "ok": False,
+            "message": (
+                "queue_ids must be a list"
+            )
+        }), 400
+
+    error_message = data.get(
+        "error_message",
+        ""
+    )
+
+    http_status = data.get(
+        "http_status"
+    )
+
+    response_message = data.get(
+        "response_message",
+        ""
+    )
+
+    try:
+        updated = mark_queue_failed(
+            queue_ids=queue_ids,
+            error_message=error_message,
+            http_status=http_status,
+            response_message=response_message
+        )
+
+    except Exception as error:
+        print(
+            "[QUEUE FAILED ERROR]",
+            type(error).__name__,
+            str(error)
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": "Cannot update queue"
+        }), 500
+
+    return jsonify({
+        "ok": True,
+        "updated": updated
+    })

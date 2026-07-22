@@ -151,6 +151,45 @@ def init_database():
         """)
 
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS outbound_sensor_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                run_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+
+                tag_name TEXT NOT NULL,
+
+                sensor_api_key TEXT NOT NULL,
+
+                capture_timestamp INTEGER NOT NULL,
+
+                value REAL NOT NULL,
+
+                status TEXT NOT NULL DEFAULT 'PENDING',
+
+                retry_count INTEGER NOT NULL DEFAULT 0,
+
+                http_status INTEGER,
+
+                response_message TEXT,
+
+                last_error TEXT,
+
+                created_at TEXT,
+
+                last_attempt_at TEXT,
+
+                sent_at TEXT,
+
+                FOREIGN KEY (run_id)
+                    REFERENCES ocr_runs(id),
+
+                FOREIGN KEY (tag_id)
+                    REFERENCES user_tags(id)
+            )
+        """)
+
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS summary_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
