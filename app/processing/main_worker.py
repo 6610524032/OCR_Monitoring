@@ -380,27 +380,93 @@ def main():
     last_capture_key = None
 
     while True:
-        should_capture, capture_key = should_capture_rtsp_now(
-            last_capture_key
+        should_capture, capture_key = (
+            should_capture_rtsp_now(
+                last_capture_key
+            )
+        )
+
+        print(
+            "[RTSP]",
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            "should_capture =",
+            should_capture
         )
 
         if should_capture:
-            capture_rtsp_image()
-            last_capture_key = capture_key
+            print(
+                "[RTSP] Scheduled capture..."
+            )
+
+            capture_result = (
+                capture_rtsp_image()
+            )
+
+            if (
+                capture_result
+                and capture_result.get("ok")
+            ):
+                print(
+                    "[RTSP] Capture successful"
+                )
+
+                process_new_image(
+                    raw_image_path=(
+                        capture_result[
+                            "image_path"
+                        ]
+                    ),
+                    captured_at=(
+                        capture_result[
+                            "captured_at"
+                        ]
+                    ),
+                    capture_timestamp=(
+                        capture_result[
+                            "capture_timestamp"
+                        ]
+                    )
+                )
+
+            else:
+                print(
+                    "[RTSP] Capture failed:",
+                    capture_result
+                )
+
+            last_capture_key = (
+                capture_key
+            )
 
         capture_result = capture_image()
 
         if capture_result:
             process_new_image(
-                raw_image_path=capture_result["image_path"],
-                captured_at=capture_result["captured_at"],
+                raw_image_path=(
+                    capture_result[
+                        "image_path"
+                    ]
+                ),
+                captured_at=(
+                    capture_result[
+                        "captured_at"
+                    ]
+                ),
                 capture_timestamp=(
-                    capture_result["capture_timestamp"]
+                    capture_result[
+                        "capture_timestamp"
+                    ]
                 )
             )
+
         else:
-            print("No new image")    
-        time.sleep(PROCESS_CHECK_INTERVAL)
+            print("No new image")
+
+        time.sleep(
+            PROCESS_CHECK_INTERVAL
+        )
 
 
 if __name__ == "__main__":
