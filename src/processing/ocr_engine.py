@@ -3,8 +3,8 @@ import re
 import cv2
 from PIL import Image
 
-from src.processing.ocr.providers.trocr_provider import (
-    get_trocr_provider,
+from src.processing.ocr.factory import (
+    get_ocr_provider,
 )
 from src.server.config import (
     CALIBRATED_IMAGES_DIR,
@@ -134,7 +134,7 @@ def read_crop(crop):
                 "message": "Cannot prepare crop",
             }
 
-        provider = get_trocr_provider()
+        provider = get_ocr_provider()
 
         raw_text = provider.read(
             pil_image,
