@@ -1,64 +1,14 @@
-import os
 import re
 
 import cv2
 from PIL import Image
 
+from src.processing.ocr.providers.trocr_provider import (
+    get_trocr_provider,
+)
 from src.server.config import (
     CALIBRATED_IMAGES_DIR,
-    MODEL_CACHE_DIR,
-    OCR_MODEL_NAME,
 )
-
-
-MODEL_CACHE_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-os.environ["HF_HOME"] = str(MODEL_CACHE_DIR)
-os.environ["HUGGINGFACE_HUB_CACHE"] = str(MODEL_CACHE_DIR)
-
-
-from transformers import (
-    TrOCRProcessor,
-    VisionEncoderDecoderModel
-)
-
-
-OCR_PROCESSOR = None
-OCR_MODEL = None
-
-
-def load_model():
-    global OCR_PROCESSOR, OCR_MODEL
-
-    if OCR_PROCESSOR is None:
-        print("[OCR] Loading processor...")
-
-        OCR_PROCESSOR = TrOCRProcessor.from_pretrained(
-            OCR_MODEL_NAME,
-            cache_dir=str(MODEL_CACHE_DIR),
-            local_files_only=True,
-            use_fast=False
-        )
-
-        print("[OCR] Processor loaded")
-
-    if OCR_MODEL is None:
-        print("[OCR] Loading model...")
-
-        OCR_MODEL = VisionEncoderDecoderModel.from_pretrained(
-            OCR_MODEL_NAME,
-            cache_dir=str(MODEL_CACHE_DIR),
-            local_files_only=True
-        )
-
-        OCR_MODEL.eval()
-
-        print("[OCR] Model loaded")
-
-    return OCR_PROCESSOR, OCR_MODEL
 
 
 def normalize_text(text):
@@ -81,7 +31,7 @@ def extract_value(text):
         r"\d+(?::\d+)+",
         r"\d+(?:[/-]\d+)+",
         r"\d+\.\d+",
-        r"\d+"
+        r"\d+",
     ]
 
     for pattern in patterns:
@@ -104,7 +54,7 @@ def prepare_crop(crop):
         12,
         12,
         cv2.BORDER_CONSTANT,
-        value=(255, 255, 255)
+        value=(255, 255, 255),
     )
 
     crop = cv2.resize(
@@ -112,15 +62,24 @@ def prepare_crop(crop):
         None,
         fx=4,
         fy=4,
-        interpolation=cv2.INTER_CUBIC
+        interpolation=cv2.INTER_CUBIC,
     )
 
-    rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(
+        crop,
+        cv2.COLOR_BGR2RGB,
+    )
 
     return Image.fromarray(rgb)
 
 
-def crop_image(image, x1, y1, x2, y2):
+def crop_image(
+    image,
+    x1,
+    y1,
+    x2,
+    y2,
+):
     image_h, image_w = image.shape[:2]
 
     x1 = int(round(float(x1)))
@@ -139,7 +98,10 @@ def crop_image(image, x1, y1, x2, y2):
     if x2 <= x1 or y2 <= y1:
         return None
 
-    return image[y1:y2, x1:x2]
+    return image[
+        y1:y2,
+        x1:x2,
+    ]
 
 
 def crop_by_roi(image, tag):
@@ -148,7 +110,7 @@ def crop_by_roi(image, tag):
         x1=tag["roi_x1"],
         y1=tag["roi_y1"],
         x2=tag["roi_x2"],
-        y2=tag["roi_y2"]
+        y2=tag["roi_y2"],
     )
 
 
@@ -158,7 +120,7 @@ def read_crop(crop):
             "ok": False,
             "value": "",
             "raw_text": "",
-            "message": "Empty crop"
+            "message": "Empty crop",
         }
 
     try:
@@ -169,25 +131,14 @@ def read_crop(crop):
                 "ok": False,
                 "value": "",
                 "raw_text": "",
-                "message": "Cannot prepare crop"
+                "message": "Cannot prepare crop",
             }
 
-        processor, model = load_model()
+        provider = get_trocr_provider()
 
-        pixel_values = processor(
-            images=pil_image,
-            return_tensors="pt"
-        ).pixel_values
-
-        generated_ids = model.generate(
-            pixel_values,
-            max_length=40
+        raw_text = provider.read(
+            pil_image,
         )
-
-        raw_text = processor.batch_decode(
-            generated_ids,
-            skip_special_tokens=True
-        )[0]
 
         value = extract_value(raw_text)
 
@@ -195,7 +146,7 @@ def read_crop(crop):
             "ok": True,
             "value": value,
             "raw_text": raw_text,
-            "message": "success"
+            "message": "success",
         }
 
     except Exception as error:
@@ -203,25 +154,36 @@ def read_crop(crop):
             "ok": False,
             "value": "",
             "raw_text": "",
-            "message": str(error)
+            "message": str(error),
         }
 
 
-def read_manual_roi(image_name, x1, y1, x2, y2):
-    image_path = CALIBRATED_IMAGES_DIR / image_name
+def read_manual_roi(
+    image_name,
+    x1,
+    y1,
+    x2,
+    y2,
+):
+    image_path = (
+        CALIBRATED_IMAGES_DIR
+        / image_name
+    )
 
     if not image_path.exists():
         return {
             "ok": False,
-            "message": "Image not found"
+            "message": "Image not found",
         }
 
-    image = cv2.imread(str(image_path))
+    image = cv2.imread(
+        str(image_path)
+    )
 
     if image is None:
         return {
             "ok": False,
-            "message": "Cannot read image"
+            "message": "Cannot read image",
         }
 
     crop = crop_image(
@@ -229,7 +191,7 @@ def read_manual_roi(image_name, x1, y1, x2, y2):
         x1=x1,
         y1=y1,
         x2=x2,
-        y2=y2
+        y2=y2,
     )
 
     result = read_crop(crop)
@@ -237,11 +199,20 @@ def read_manual_roi(image_name, x1, y1, x2, y2):
     if not result.get("ok"):
         return {
             "ok": False,
-            "message": result.get("message", "OCR failed")
+            "message": result.get(
+                "message",
+                "OCR failed",
+            ),
         }
 
     return {
         "ok": True,
-        "text": result.get("value", ""),
-        "raw_text": result.get("raw_text", "")
+        "text": result.get(
+            "value",
+            "",
+        ),
+        "raw_text": result.get(
+            "raw_text",
+            "",
+        ),
     }
