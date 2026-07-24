@@ -412,6 +412,155 @@ Element ของรูปต้องเท่ากับภาพที่แ
     text-align: center;
 }
 
+/* =====================================================
+   OCR MODEL STATUS
+===================================================== */
+
+.ocr-model-status-card {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+
+    min-height: 110px;
+    padding: 18px 22px;
+
+    border: 1px solid #fde68a;
+
+    transition:
+        border-color 0.25s ease,
+        background-color 0.25s ease,
+        box-shadow 0.25s ease;
+}
+
+.ocr-status-icon-area {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 58px;
+    height: 58px;
+    flex: 0 0 58px;
+}
+
+.ocr-status-content {
+    min-width: 0;
+}
+
+.ocr-status-content h2 {
+    margin: 0 0 7px;
+    font-size: 20px;
+}
+
+.ocr-status-content p {
+    margin: 0;
+    line-height: 1.45;
+}
+
+.ocr-status-message {
+    margin-top: 7px !important;
+
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* Loading */
+
+.ocr-status-loading {
+    border-color: #fde68a;
+    background: #fffbeb;
+}
+
+.ocr-status-loading .ocr-status-content h2 {
+    color: #92400e;
+}
+
+.ocr-status-loading .ocr-status-message {
+    color: #b45309;
+}
+
+.ocr-status-spinner {
+    width: 40px;
+    height: 40px;
+
+    box-sizing: border-box;
+
+    border: 5px solid #fde68a;
+    border-top-color: #d97706;
+    border-radius: 50%;
+
+    animation: ocr-status-spin 0.9s linear infinite;
+}
+
+@keyframes ocr-status-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Ready */
+
+.ocr-status-ready {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+}
+
+.ocr-status-ready .ocr-status-content h2 {
+    color: #166534;
+}
+
+.ocr-status-ready .ocr-status-message {
+    color: #15803d;
+}
+
+.ocr-status-ready-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 46px;
+    height: 46px;
+
+    border-radius: 50%;
+
+    background: #16a34a;
+    color: #ffffff;
+
+    font-size: 29px;
+    font-weight: bold;
+}
+
+/* Error */
+
+.ocr-status-error {
+    border-color: #fecaca;
+    background: #fef2f2;
+}
+
+.ocr-status-error .ocr-status-content h2 {
+    color: #991b1b;
+}
+
+.ocr-status-error .ocr-status-message {
+    color: #dc2626;
+}
+
+.ocr-status-error-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 46px;
+    height: 46px;
+
+    border-radius: 50%;
+
+    background: #dc2626;
+    color: #ffffff;
+
+    font-size: 29px;
+    font-weight: bold;
+}
+
 
 /* =====================================================
    MANUAL ROI SETUP
@@ -837,4 +986,20 @@ input{
         max-width:100%;
     }
 
+    .ocr-model-status-card {
+        align-items: flex-start;
+        gap: 13px;
+        padding: 16px;
+    }
+
+    .ocr-status-icon-area {
+        width: 46px;
+        height: 46px;
+        flex-basis: 46px;
+    }
+
+    .ocr-status-spinner {
+        width: 36px;
+        height: 36px;
+    }
 }

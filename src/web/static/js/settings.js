@@ -10,6 +10,12 @@ let sortedPoints = [];
 let manualBoxes = [];
 let drawMode = false;
 let isDrawingBox = false;
+
+let isOcrModelReady = false;
+let ocrStatusInterval = null;
+
+const OCR_STATUS_CHECK_INTERVAL_MS = 2000;
+
 let startPoint = null;
 let currentPoint = null;
 
@@ -882,6 +888,302 @@ if (resetAllBtn) {
 
 
 /* =====================================================
+   OCR MODEL STATUS
+===================================================== */
+
+function disableRoiDrawing() {
+    isOcrModelReady = false;
+    drawMode = false;
+    isDrawingBox = false;
+    startPoint = null;
+    currentPoint = null;
+
+    const drawButton =
+        document.getElementById(
+            "drawRoiBtn"
+        );
+
+    const modeText =
+        document.getElementById(
+            "modeText"
+        );
+
+    if (drawButton) {
+        drawButton.disabled = true;
+        drawButton.classList.remove(
+            "active"
+        );
+
+        drawButton.innerText =
+            "Draw ROI";
+
+        drawButton.title =
+            "OCR model is preparing...";
+    }
+
+    if (modeText) {
+        modeText.innerText =
+            "Draw Mode OFF";
+    }
+
+    drawRoiCanvas();
+}
+
+
+function enableRoiDrawing() {
+    isOcrModelReady = true;
+
+    const drawButton =
+        document.getElementById(
+            "drawRoiBtn"
+        );
+
+    if (drawButton) {
+        drawButton.disabled = false;
+        drawButton.title = "";
+    }
+}
+
+
+function updateOcrStatusCard(
+    status,
+    message
+) {
+    const card =
+        document.getElementById(
+            "ocrModelStatusCard"
+        );
+
+    const spinner =
+        document.getElementById(
+            "ocrStatusSpinner"
+        );
+
+    const readyIcon =
+        document.getElementById(
+            "ocrStatusReadyIcon"
+        );
+
+    const errorIcon =
+        document.getElementById(
+            "ocrStatusErrorIcon"
+        );
+
+    const title =
+        document.getElementById(
+            "ocrStatusTitle"
+        );
+
+    const description =
+        document.getElementById(
+            "ocrStatusDescription"
+        );
+
+    const statusMessage =
+        document.getElementById(
+            "ocrStatusMessage"
+        );
+
+    if (!card) {
+        return;
+    }
+
+    const normalizedStatus =
+        String(status || "")
+            .trim()
+            .toUpperCase();
+
+    card.classList.remove(
+        "ocr-status-loading",
+        "ocr-status-ready",
+        "ocr-status-error"
+    );
+
+    if (spinner) {
+        spinner.style.display = "none";
+    }
+
+    if (readyIcon) {
+        readyIcon.style.display = "none";
+    }
+
+    if (errorIcon) {
+        errorIcon.style.display = "none";
+    }
+
+    if (normalizedStatus === "READY") {
+        card.classList.add(
+            "ocr-status-ready"
+        );
+
+        if (readyIcon) {
+            readyIcon.style.display =
+                "flex";
+        }
+
+        if (title) {
+            title.innerText =
+                "OCR Model Ready";
+        }
+
+        if (description) {
+            description.innerText =
+                "ระบบพร้อมใช้งานแล้ว สามารถเริ่มวาด Manual ROI ได้";
+        }
+
+        if (statusMessage) {
+            statusMessage.innerText =
+                message ||
+                "OCR model is ready.";
+        }
+
+        enableRoiDrawing();
+        return;
+    }
+
+    if (normalizedStatus === "ERROR") {
+        card.classList.add(
+            "ocr-status-error"
+        );
+
+        if (errorIcon) {
+            errorIcon.style.display =
+                "flex";
+        }
+
+        if (title) {
+            title.innerText =
+                "OCR Model Error";
+        }
+
+        if (description) {
+            description.innerText =
+                "ไม่สามารถเตรียมโมเดล OCR ได้ กรุณาตรวจสอบข้อความผิดพลาด";
+        }
+
+        if (statusMessage) {
+            statusMessage.innerText =
+                message ||
+                "Cannot prepare OCR model.";
+        }
+
+        disableRoiDrawing();
+        return;
+    }
+
+    card.classList.add(
+        "ocr-status-loading"
+    );
+
+    if (spinner) {
+        spinner.style.display = "block";
+    }
+
+    if (title) {
+        if (
+            normalizedStatus ===
+            "DOWNLOADING"
+        ) {
+            title.innerText =
+                "Downloading OCR Model...";
+        } else if (
+            normalizedStatus ===
+            "LOADING"
+        ) {
+            title.innerText =
+                "Loading OCR Model...";
+        } else {
+            title.innerText =
+                "Preparing OCR Model...";
+        }
+    }
+
+    if (description) {
+        description.innerText =
+            "กรุณารอจนกว่าโมเดล OCR จะพร้อมใช้งาน ก่อนเริ่มวาด Manual ROI";
+    }
+
+    if (statusMessage) {
+        statusMessage.innerText =
+            message ||
+            "Checking OCR model status...";
+    }
+
+    disableRoiDrawing();
+}
+
+
+async function checkOcrModelStatus() {
+    try {
+        const response = await fetch(
+            "/web_api/api/ocr/status?t=" +
+            Date.now(),
+            {
+                cache: "no-store"
+            }
+        );
+
+        const result =
+            await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                result.message ||
+                "Cannot check OCR model status."
+            );
+        }
+
+        updateOcrStatusCard(
+            result.status,
+            result.message
+        );
+
+        if (
+            String(result.status)
+                .toUpperCase() === "READY" &&
+            ocrStatusInterval
+        ) {
+            clearInterval(
+                ocrStatusInterval
+            );
+
+            ocrStatusInterval = null;
+        }
+
+    } catch (error) {
+        console.error(
+            "OCR status error:",
+            error
+        );
+
+        updateOcrStatusCard(
+            "ERROR",
+            error.message ||
+            "Cannot connect to OCR status service."
+        );
+    }
+}
+
+
+function startOcrStatusMonitoring() {
+    disableRoiDrawing();
+
+    checkOcrModelStatus();
+
+    if (ocrStatusInterval) {
+        clearInterval(
+            ocrStatusInterval
+        );
+    }
+
+    ocrStatusInterval = setInterval(
+        checkOcrModelStatus,
+        OCR_STATUS_CHECK_INTERVAL_MS
+    );
+}
+
+
+/* =====================================================
    ROI DRAWING
 ===================================================== */
 
@@ -910,7 +1212,10 @@ if (roiImage) {
     roiImage.addEventListener(
         "mousedown",
         function (event) {
-            if (!drawMode) {
+            if (
+                !isOcrModelReady ||
+                !drawMode
+            ) {
                 return;
             }
 
@@ -1013,9 +1318,18 @@ const drawRoiBtn =
     document.getElementById("drawRoiBtn");
 
 if (drawRoiBtn) {
+    drawRoiBtn.disabled = true;
+
     drawRoiBtn.addEventListener(
         "click",
         function () {
+            if (!isOcrModelReady) {
+                alert(
+                    "กรุณารอจนกว่าโมเดล OCR จะพร้อมใช้งาน"
+                );
+                return;
+             }
+
             drawMode = !drawMode;
 
             const modeText =
@@ -1338,57 +1652,33 @@ async function readBoxWithOCR(box) {
                 "UNKNOWN";
 
             box.status = "done";
+
+        } else if (
+            result.status === "loading"
+        ) {
+            box.value =
+                result.message ||
+                "Preparing OCR Model...";
+
+            box.status = "waiting";
+
         } else {
-            box.value = "OCR ERROR";
+            box.value =
+                result.message ||
+                "OCR ERROR";
+
             box.status = "error";
         }
+
     } catch (error) {
         console.error(error);
 
-        box.value = "OCR ERROR";
+        box.value = "Cannot connect to OCR service";
         box.status = "error";
     }
 
     drawRoiCanvas();
     updateRoiTable();
-}
-
-
-async function readManualRoiWithOCR(
-    x1,
-    y1,
-    x2,
-    y2
-) {
-    if (!roiImage) {
-        return {
-            ok: false,
-            message: "ROI image missing"
-        };
-    }
-
-    const imageName =
-        roiImage.dataset.currentImage;
-
-    const response = await fetch(
-        "/web_api/api/read_manual_roi",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type":
-                    "application/json"
-            },
-            body: JSON.stringify({
-                image: imageName,
-                x1: x1,
-                y1: y1,
-                x2: x2,
-                y2: y2
-            })
-        }
-    );
-
-    return await response.json();
 }
 
 
@@ -1432,6 +1722,16 @@ function updateRoiTable() {
 
                 statusText =
                     "Ready";
+
+            } else if (
+                box.status === "waiting"
+            ) {
+                statusClass =
+                    "badge-pending";
+
+                statusText =
+                    "Preparing";
+
             } else if (
                 box.status === "error"
             ) {
@@ -1596,15 +1896,15 @@ if (saveAllBtn) {
                 manualBoxes.some(
                     function (box) {
                         return (
-                            box.status ===
-                            "pending"
+                            box.status === "pending" ||
+                             box.status === "waiting"
                         );
                     }
                 );
 
             if (notReady) {
                 alert(
-                    "ยังมี ROI ที่กำลังอ่าน OCR อยู่ กรุณารอสักครู่"
+                    "OCR Model ยังไม่พร้อม กรุณารอสักครู่แล้วลองอ่านใหม่"
                 );
                 return;
             }
@@ -2295,3 +2595,4 @@ async function loadCameraConfiguration() {
 }
 
 loadCameraConfiguration();
+startOcrStatusMonitoring();

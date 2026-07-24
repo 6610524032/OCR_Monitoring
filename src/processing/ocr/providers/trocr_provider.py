@@ -38,6 +38,104 @@ class TrOCRProvider:
             VisionEncoderDecoderModel
         ] = None
 
+    def _prepare_cache(self) -> None:
+        """
+        Prepare Hugging Face cache directory.
+        """
+        MODEL_CACHE_DIR.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        os.environ["HF_HOME"] = str(
+            MODEL_CACHE_DIR
+        )
+
+        os.environ[
+            "HUGGINGFACE_HUB_CACHE"
+        ] = str(
+            MODEL_CACHE_DIR
+        )
+
+    def _load_processor(
+        self,
+    ) -> TrOCRProcessor:
+        """
+        Load the TrOCR processor.
+
+        Try local cache first.
+        Download automatically if necessary.
+        """
+
+        try:
+            return TrOCRProcessor.from_pretrained(
+                OCR_MODEL_NAME,
+                cache_dir=str(
+                    MODEL_CACHE_DIR,
+                ),
+                local_files_only=True,
+                use_fast=False,
+            )
+
+        except Exception:
+
+            set_model_status(
+                OCRModelStatus.DOWNLOADING,
+                "Downloading TrOCR processor",
+            )
+
+            return TrOCRProcessor.from_pretrained(
+                OCR_MODEL_NAME,
+                cache_dir=str(
+                    MODEL_CACHE_DIR,
+                ),
+                local_files_only=False,
+                use_fast=False,
+            )
+
+    def _load_model(
+        self,
+    ) -> VisionEncoderDecoderModel:
+        """
+        Load the TrOCR model.
+
+        Try local cache first.
+        Download automatically if necessary.
+        """
+
+        try:
+
+            model = (
+                VisionEncoderDecoderModel.from_pretrained(
+                    OCR_MODEL_NAME,
+                    cache_dir=str(
+                        MODEL_CACHE_DIR,
+                    ),
+                    local_files_only=True,
+                )
+            )
+
+        except Exception:
+
+            set_model_status(
+                OCRModelStatus.DOWNLOADING,
+                "Downloading TrOCR model",
+            )
+
+            model = (
+                VisionEncoderDecoderModel.from_pretrained(
+                    OCR_MODEL_NAME,
+                    cache_dir=str(
+                        MODEL_CACHE_DIR,
+                    ),
+                    local_files_only=False,
+                )
+            )
+
+        model.eval()
+
+        return model
+
     def load_model(
         self,
     ) -> tuple[
@@ -46,9 +144,6 @@ class TrOCRProvider:
     ]:
         """
         Load the TrOCR processor and model into memory.
-
-        This step loads only model files that already exist
-        in the local model cache.
         """
 
         if (
@@ -61,24 +156,16 @@ class TrOCRProvider:
             )
 
         try:
+
             set_model_status(
                 OCRModelStatus.CHECKING,
                 "Checking TrOCR model cache",
             )
 
-            MODEL_CACHE_DIR.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
+            self._prepare_cache()
 
-            os.environ["HF_HOME"] = str(
-                MODEL_CACHE_DIR
-            )
-
-            os.environ[
-                "HUGGINGFACE_HUB_CACHE"
-            ] = str(
-                MODEL_CACHE_DIR
+            print(
+                "[OCR][TrOCR] Loading processor..."
             )
 
             set_model_status(
@@ -86,25 +173,16 @@ class TrOCRProvider:
                 "Loading TrOCR processor",
             )
 
-            print(
-                "[OCR][TrOCR] "
-                "Loading processor..."
-            )
-
             self.processor = (
-                TrOCRProcessor.from_pretrained(
-                    OCR_MODEL_NAME,
-                    cache_dir=str(
-                        MODEL_CACHE_DIR
-                    ),
-                    local_files_only=True,
-                    use_fast=False,
-                )
+                self._load_processor()
             )
 
             print(
-                "[OCR][TrOCR] "
-                "Processor loaded"
+                "[OCR][TrOCR] Processor loaded"
+            )
+
+            print(
+                "[OCR][TrOCR] Loading model..."
             )
 
             set_model_status(
@@ -112,26 +190,12 @@ class TrOCRProvider:
                 "Loading TrOCR model",
             )
 
-            print(
-                "[OCR][TrOCR] "
-                "Loading model..."
-            )
-
             self.model = (
-                VisionEncoderDecoderModel.from_pretrained(
-                    OCR_MODEL_NAME,
-                    cache_dir=str(
-                        MODEL_CACHE_DIR
-                    ),
-                    local_files_only=True,
-                )
+                self._load_model()
             )
 
-            self.model.eval()
-
             print(
-                "[OCR][TrOCR] "
-                "Model loaded"
+                "[OCR][TrOCR] Model loaded"
             )
 
             set_model_status(
@@ -145,11 +209,13 @@ class TrOCRProvider:
             )
 
         except Exception as exc:
+
             set_model_status(
                 OCRModelStatus.ERROR,
                 "Failed to load TrOCR model",
                 str(exc),
             )
+
             raise
 
     def read(
@@ -159,6 +225,7 @@ class TrOCRProvider:
         """
         Read text from a PIL image using TrOCR.
         """
+
         processor, model = (
             self.load_model()
         )
@@ -183,7 +250,9 @@ class TrOCRProvider:
         if not decoded_text:
             return ""
 
-        return str(decoded_text[0])
+        return str(
+            decoded_text[0]
+        )
 
 
 _TROCR_PROVIDER: Optional[
@@ -195,6 +264,7 @@ def get_trocr_provider() -> TrOCRProvider:
     """
     Return the shared TrOCR provider instance.
     """
+
     global _TROCR_PROVIDER
 
     if _TROCR_PROVIDER is None:

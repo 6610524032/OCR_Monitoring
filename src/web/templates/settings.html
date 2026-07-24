@@ -300,6 +300,65 @@
 </div>
 
     <!-- =====================================================
+         OCR MODEL STATUS
+    ===================================================== -->
+
+    <div
+        id="ocrModelStatusCard"
+        class="card ocr-model-status-card ocr-status-loading"
+        role="status"
+        aria-live="polite"
+    >
+        <div class="ocr-status-icon-area">
+
+            <div
+                id="ocrStatusSpinner"
+                class="ocr-status-spinner"
+                aria-hidden="true"
+            ></div>
+
+            <div
+                id="ocrStatusReadyIcon"
+                class="ocr-status-ready-icon"
+                aria-hidden="true"
+                style="display: none;"
+            >
+                ✓
+            </div>
+
+            <div
+                id="ocrStatusErrorIcon"
+                class="ocr-status-error-icon"
+                aria-hidden="true"
+                style="display: none;"
+            >
+                !
+            </div>
+
+        </div>
+
+        <div class="ocr-status-content">
+
+            <h2 id="ocrStatusTitle">
+                Preparing OCR Model...
+            </h2>
+
+            <p id="ocrStatusDescription">
+                กรุณารอจนกว่าโมเดล OCR จะพร้อมใช้งาน
+                ก่อนเริ่มวาด Manual ROI
+            </p>
+
+            <p
+                id="ocrStatusMessage"
+                class="ocr-status-message"
+            >
+                Checking OCR model status...
+            </p>
+
+        </div>
+    </div>
+    
+    <!-- =====================================================
          4. MANUAL ROI SETUP
     ===================================================== -->
 

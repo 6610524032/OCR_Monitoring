@@ -5,6 +5,10 @@ from src.processing.ocr.service import (
     read_manual_roi,
 )
 
+from src.processing.ocr.model_status import (
+    OCRModelStatus,
+    get_model_state,
+)
 from src.server.auth import require_api_key
 from src.server.repositories.configuration_repository import (
     reset_configuration_data
@@ -35,6 +39,15 @@ worker_bp = Blueprint(
 @require_api_key
 def api_read_manual_roi():
     data = request.json or {}
+
+    model_state = get_model_state()
+
+    if model_state.status != OCRModelStatus.READY:
+        return jsonify({
+            "ok": False,
+            "status": "loading",
+            "message": model_state.message,
+        })
 
     result = read_manual_roi(
         image_name=data.get("image"),
@@ -442,3 +455,16 @@ def api_mark_queue_failed():
         "ok": True,
         "updated": updated
     })
+
+
+@worker_bp.get("/api/ocr/status")
+@require_api_key
+def get_ocr_status():
+    model_state = get_model_state()
+
+    return jsonify(
+        {
+            "status": model_state.status.value,
+            "message": model_state.message,
+        }
+    )

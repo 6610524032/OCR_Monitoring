@@ -18,6 +18,14 @@ from src.processing.ocr.service import (
     crop_by_roi,
     read_crop,
 )
+from src.processing.ocr.factory import (
+    get_ocr_provider,
+)
+from src.processing.ocr.model_status import (
+    OCRModelStatus,
+    get_model_state,
+    set_model_status,
+)
 from src.server.api_client import (
     ApiClientError,
     api_get,
@@ -219,6 +227,17 @@ def process_ocr_for_tags(
     captured_at,
     capture_timestamp
 ):
+    model_state = get_model_state()
+
+    if model_state.status != OCRModelStatus.READY:
+        print(
+            "[OCR] Model is not ready:",
+            model_state.status.value,
+            "-",
+            model_state.message,
+        )
+        return None
+
     if not tags:
         print(
             "No active user tags. "
@@ -362,12 +381,44 @@ def should_capture_rtsp_now(last_capture_key):
     return True, capture_key
 
 
+def prepare_ocr_model():
+    print("[OCR MODEL] Preparing model in background...")
+
+    try:
+        provider = get_ocr_provider()
+        provider.load_model()
+
+        print("[OCR MODEL] Model is ready")
+
+    except Exception as error:
+        set_model_status(
+            OCRModelStatus.ERROR,
+            message="Cannot prepare OCR model",
+            error=str(error),
+        )
+
+        print(
+            "[OCR MODEL ERROR]",
+            type(error).__name__,
+            str(error),
+        )
+
+
 def main():
     print("OCR Worker Started")
     print("All data access uses API")
     print("RTSP capture uses real clock time")
     print(f"Waiting for images in {INCOMING_DIR}")
     print("Press Ctrl + C to stop")
+
+    ocr_model_thread = Thread(
+        target=prepare_ocr_model,
+        name="OCRModelLoader",
+        daemon=True,
+    )
+    ocr_model_thread.start()
+
+    print("OCR Model Loader Started")
 
     sender_thread = Thread(
         target=sender_loop,
