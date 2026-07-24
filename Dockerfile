@@ -30,7 +30,6 @@ RUN pip install --no-cache-dir -r /app/requirements-torch.txt
 COPY src /app/src
 COPY preload_model.py /app/preload_model.py
 
-RUN python /app/preload_model.py
 
 EXPOSE 5000
 EXPOSE 5001

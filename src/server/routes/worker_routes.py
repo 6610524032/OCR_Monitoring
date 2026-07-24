@@ -1,7 +1,7 @@
 from datetime import datetime
 from flask import Blueprint, jsonify, request
 
-from src.processing.trocr_engine import read_manual_roi
+from src.processing.ocr_engine import read_manual_roi
 
 from src.server.auth import require_api_key
 from src.server.repositories.configuration_repository import (

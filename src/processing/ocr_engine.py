@@ -6,11 +6,9 @@ from PIL import Image
 
 from src.server.config import (
     CALIBRATED_IMAGES_DIR,
-    MODEL_CACHE_DIR
+    MODEL_CACHE_DIR,
+    OCR_MODEL_NAME,
 )
-
-
-MODEL_NAME = "microsoft/trocr-base-printed"
 
 
 MODEL_CACHE_DIR.mkdir(
@@ -28,39 +26,39 @@ from transformers import (
 )
 
 
-TROCR_PROCESSOR = None
-TROCR_MODEL = None
+OCR_PROCESSOR = None
+OCR_MODEL = None
 
 
 def load_model():
-    global TROCR_PROCESSOR, TROCR_MODEL
+    global OCR_PROCESSOR, OCR_MODEL
 
-    if TROCR_PROCESSOR is None:
-        print("[TrOCR] Loading processor...")
+    if OCR_PROCESSOR is None:
+        print("[OCR] Loading processor...")
 
-        TROCR_PROCESSOR = TrOCRProcessor.from_pretrained(
-            MODEL_NAME,
+        OCR_PROCESSOR = TrOCRProcessor.from_pretrained(
+            OCR_MODEL_NAME,
             cache_dir=str(MODEL_CACHE_DIR),
             local_files_only=True,
             use_fast=False
         )
 
-        print("[TrOCR] Processor loaded")
+        print("[OCR] Processor loaded")
 
-    if TROCR_MODEL is None:
-        print("[TrOCR] Loading model...")
+    if OCR_MODEL is None:
+        print("[OCR] Loading model...")
 
-        TROCR_MODEL = VisionEncoderDecoderModel.from_pretrained(
-            MODEL_NAME,
+        OCR_MODEL = VisionEncoderDecoderModel.from_pretrained(
+            OCR_MODEL_NAME,
             cache_dir=str(MODEL_CACHE_DIR),
             local_files_only=True
         )
 
-        TROCR_MODEL.eval()
+        OCR_MODEL.eval()
 
-        print("[TrOCR] Model loaded")
+        print("[OCR] Model loaded")
 
-    return TROCR_PROCESSOR, TROCR_MODEL
+    return OCR_PROCESSOR, OCR_MODEL
 
 
 def normalize_text(text):
@@ -154,7 +152,7 @@ def crop_by_roi(image, tag):
     )
 
 
-def read_crop_with_trocr(crop):
+def read_crop(crop):
     if crop is None or crop.size == 0:
         return {
             "ok": False,
@@ -234,12 +232,12 @@ def read_manual_roi(image_name, x1, y1, x2, y2):
         y2=y2
     )
 
-    result = read_crop_with_trocr(crop)
+    result = read_crop(crop)
 
     if not result.get("ok"):
         return {
             "ok": False,
-            "message": result.get("message", "TrOCR failed")
+            "message": result.get("message", "OCR failed")
         }
 
     return {

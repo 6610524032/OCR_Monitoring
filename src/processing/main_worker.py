@@ -14,9 +14,9 @@ from src.processing.rtsp_capture import (
 from src.processing.sender_worker import (
     sender_loop
 )
-from src.processing.trocr_engine import (
+from src.processing.ocr_engine import (
     crop_by_roi,
-    read_crop_with_trocr
+    read_crop
 )
 from src.server.api_client import (
     ApiClientError,
@@ -63,7 +63,7 @@ def read_all_tags_from_image(calibrated_image_path, tags):
     for tag in tags:
         tag_name = tag["tag_name"]
         crop = crop_by_roi(image, tag)
-        ocr_result = read_crop_with_trocr(crop)
+        ocr_result = read_crop(crop)
 
         value = ""
         raw_text = ""
@@ -472,3 +472,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

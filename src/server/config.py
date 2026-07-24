@@ -72,17 +72,26 @@ API_SERVER_URL = os.environ.get(
 
 
 # =====================================================
+# OCR MODEL
+# =====================================================
+
+OCR_MODEL_NAME = os.getenv(
+    "OCR_MODEL_NAME",
+    "microsoft/trocr-base-printed",
+)
+
+
+# =====================================================
 # MODEL CACHE
 # =====================================================
 
 MODEL_CACHE_DIR = Path(
     os.environ.get(
         "MODEL_CACHE_DIR",
-        str(PROJECT_ROOT / "model_cache" / "huggingface")
+        str(
+            PROJECT_ROOT
+            / "model_cache"
+            / "huggingface"
+        )
     )
-)
-
-MODEL_CACHE_DIR.mkdir(
-    parents=True,
-    exist_ok=True
 )
