@@ -72,8 +72,13 @@ API_SERVER_URL = os.environ.get(
 
 
 # =====================================================
-# OCR MODEL
+# OCR
 # =====================================================
+
+OCR_ENGINE = os.getenv(
+    "OCR_ENGINE",
+    "trocr",
+).strip().lower()
 
 OCR_MODEL_NAME = os.getenv(
     "OCR_MODEL_NAME",
