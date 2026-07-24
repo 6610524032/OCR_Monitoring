@@ -43,6 +43,7 @@ tmp/
 temp/
 
 # Runtime generated data
-app/server/data/raw_images/
-app/server/data/calibrated_images/
-app/server/data/incoming/
+data/raw_images/
+data/calibrated_images/
+data/incoming/
+data/database/

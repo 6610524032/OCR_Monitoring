@@ -2,16 +2,18 @@ services:
   api:
     build: .
     container_name: ocr_api
-    command: python -m app.server.api_app
-    ports:
-      - "5001:5001"
+    # command: python -m src.server.api_app
+    command: gunicorn src.server.api_app:app --reload --bind 0.0.0.0:5001
+    # command: "tail -f /dev/null"
+    # ports:
+    #   - "5011:5001"
     environment:
       - PYTHONPATH=/app
       - API_KEY=${API_KEY:-dev-api-key}
       - HF_HOME=/app/model_cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
     volumes:
-      - ./app/server/data:/app/app/server/data
+      - ./:/app
     healthcheck:
       test:
         [
@@ -23,37 +25,112 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
 
   worker:
     build: .
     container_name: ocr_worker
-    command: python -m app.processing.main_worker
+    command: pymon --exec "python -m src.processing.main_worker" --watch ./src
+    # command: "tail -f /dev/null"
     depends_on:
       api:
         condition: service_healthy
+      gluetun:
+        condition: service_started
     environment:
       - PYTHONPATH=/app
       - API_KEY=${API_KEY:-dev-api-key}
-      - API_SERVER_URL=http://api:5001
+      - API_SERVER_URL=http://127.0.0.1:5001
       - HF_HOME=/app/model_cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
     volumes:
-      - ./app/server/data:/app/app/server/data
+      - ./:/app
+    network_mode: "service:gluetun"
+    restart: unless-stopped
 
   web:
     build: .
     container_name: ocr_web
-    command: python -m app.web.web_app
-    ports:
-      - "5000:5000"
+    # command: python -m src.web.web_app
+    command: gunicorn src.web.web_app:app --reload --bind 0.0.0.0:5000
+    # command: "tail -f /dev/null"
+    # ports:
+    #   - "5010:5000"
     depends_on:
       api:
         condition: service_healthy
+      gluetun:
+        condition: service_started
     environment:
       - PYTHONPATH=/app
       - API_KEY=${API_KEY:-dev-api-key}
-      - API_SERVER_URL=http://api:5001
+      - API_SERVER_URL=http://127.0.0.1:5001
       - HF_HOME=/app/model_cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
     volumes:
-      - ./app/server/data:/app/app/server/data
+      - ./:/app
+    network_mode: "service:gluetun"
+    restart: unless-stopped
+      
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: ocr_gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - DNS_SERVER=on
+      - DNS_UPSTREAM_RESOLVER_TYPE=plain
+      - DNS_UPSTREAM_PLAIN_ADDRESSES=1.1.1.1:53,8.8.8.8:53
+
+      - TZ=Asia/Bangkok
+      - LOG_LEVEL=debug
+
+      # VPN server
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - WIREGUARD_ALLOWED_IPS=10.8.0.0/24,10.250.0.0/16
+      - WIREGUARD_MTU=1420
+      - WIREGUARD_PERSISTENT_KEEPALIVE_INTERVAL=25s
+      
+      # VPN server endpoint
+      - WIREGUARD_ENDPOINT_IP=10.226.1.201
+      - WIREGUARD_ENDPOINT_PORT=1194
+
+      # WireGuard client config
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_PUBLIC_KEY=${WIREGUARD_PUBLIC_KEY}
+      - WIREGUARD_ADDRESSES=10.8.0.253/24
+
+      # Allow access to camera LANs through VPN
+      - FIREWALL=off
+      - FIREWALL_ENABLED_DISABLING_IT_SHOOTS_YOU_IN_YOUR_FOOT=off
+
+      # Optional: allow NAS LAN access to web app
+      - FIREWALL_INPUT_PORTS=8902
+
+    ports:
+      - "127.0.0.1:8910:5000"
+      - "127.0.0.1:8911:5001"
+    # networks:
+    #   - app-network
+
+    restart: unless-stopped
+
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: filebrowser
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8121:80"
+    volumes:
+      # Directory you want to browse
+      - ./data:/srv
+      # Database
+      - ./filebrowser.db:/database/filebrowser.db
+      # Configuration
+      - ./filebrowser.json:/.filebrowser.json
