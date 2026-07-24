@@ -14,9 +14,9 @@ from src.processing.rtsp_capture import (
 from src.processing.sender_worker import (
     sender_loop
 )
-from src.processing.ocr_engine import (
+from src.processing.ocr.service import (
     crop_by_roi,
-    read_crop
+    read_crop,
 )
 from src.server.api_client import (
     ApiClientError,
