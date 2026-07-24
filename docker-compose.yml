@@ -15,7 +15,6 @@ services:
       - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
     volumes:
       - ./:/app
-      - ocr_model_cache:/app/model_cache/huggingface
     healthcheck:
       test:
         [
@@ -51,7 +50,6 @@ services:
       - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
     volumes:
       - ./:/app
-      - ocr_model_cache:/app/model_cache/huggingface
     network_mode: "service:gluetun"
     restart: unless-stopped
 
@@ -76,7 +74,6 @@ services:
       - HUGGINGFACE_HUB_CACHE=/app/model_cache/huggingface
     volumes:
       - ./:/app
-      - ocr_model_cache:/app/model_cache/huggingface
     network_mode: "service:gluetun"
     restart: unless-stopped
       
