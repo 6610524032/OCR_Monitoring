@@ -164,6 +164,8 @@ class TrOCRProvider:
 
             self._prepare_cache()
 
+            print(f"[OCR] Model name = {OCR_MODEL_NAME}")
+
             print(
                 "[OCR][TrOCR] Loading processor..."
             )

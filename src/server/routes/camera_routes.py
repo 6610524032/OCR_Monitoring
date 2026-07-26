@@ -174,7 +174,10 @@ def api_test_camera():
         }), 500
 
 
-@camera_bp.route("/api/capture_image", methods=["POST"])
+@camera_bp.route(
+    "/api/capture_image",
+    methods=["POST"]
+)
 @require_api_key
 def api_capture_image():
 
@@ -187,8 +190,29 @@ def api_capture_image():
                 "message": "Cannot capture image."
             }), 500
 
-        image_path = capture_result.get("image_path")
-        captured_at = capture_result.get("captured_at")
+        # ต้องตรวจผลลัพธ์จาก capture_rtsp_image ก่อน
+        # เพราะกรณีผิดพลาดจะไม่มี image_path
+        if not capture_result.get("ok"):
+            return jsonify({
+                "ok": False,
+                "stage": capture_result.get(
+                    "stage",
+                    "unknown"
+                ),
+                "message": capture_result.get(
+                    "message",
+                    "Cannot capture image."
+                )
+            }), 500
+
+        image_path = capture_result.get(
+            "image_path"
+        )
+
+        captured_at = capture_result.get(
+            "captured_at"
+        )
+
         capture_timestamp = capture_result.get(
             "capture_timestamp"
         )
@@ -196,17 +220,21 @@ def api_capture_image():
         if not image_path:
             return jsonify({
                 "ok": False,
+                "stage": "capture_result",
                 "message": (
-                    "Capture result does not contain "
-                    "an image path."
+                    "Capture succeeded but the result "
+                    "does not contain an image path."
                 )
             }), 500
 
-        image_path_obj = Path(image_path).resolve()
+        image_path_obj = Path(
+            image_path
+        ).resolve()
 
         if not image_path_obj.exists():
             return jsonify({
                 "ok": False,
+                "stage": "verify_image",
                 "message": (
                     "Captured image file does not exist: "
                     + str(image_path_obj)
@@ -225,7 +253,9 @@ def api_capture_image():
             )
 
         except ValueError:
-            date_folder = image_path_obj.parent.name
+            date_folder = (
+                image_path_obj.parent.name
+            )
 
             relative_image_path = (
                 date_folder
@@ -238,33 +268,20 @@ def api_capture_image():
             + relative_image_path
         )
 
-        print(
-            "Captured image path:",
-            image_path_obj
-        )
-
-        print(
-            "Captured image URL:",
-            image_url
-        )
-
         return jsonify({
             "ok": True,
             "image": relative_image_path,
             "image_url": image_url,
             "captured_at": captured_at,
             "capture_timestamp": capture_timestamp,
-            "message": "Image captured successfully."
+            "message": (
+                "Image captured successfully."
+            )
         })
 
     except Exception as error:
-
-        print(
-            "Capture image error:",
-            error
-        )
-
         return jsonify({
             "ok": False,
+            "stage": "capture_route",
             "message": str(error)
         }), 500

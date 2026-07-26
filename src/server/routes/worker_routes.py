@@ -7,7 +7,7 @@ from src.processing.ocr.service import (
 
 from src.processing.ocr.model_status import (
     OCRModelStatus,
-    get_model_state,
+    read_model_status_file,
 )
 from src.server.auth import require_api_key
 from src.server.repositories.configuration_repository import (
@@ -35,18 +35,33 @@ worker_bp = Blueprint(
 )
 
 
-@worker_bp.route("/api/read_manual_roi", methods=["POST"])
+@worker_bp.route(
+    "/api/read_manual_roi",
+    methods=["POST"]
+)
 @require_api_key
 def api_read_manual_roi():
-    data = request.json or {}
+    data = request.get_json(
+        silent=True
+    ) or {}
 
-    model_state = get_model_state()
+    model_status = read_model_status_file()
 
-    if model_state.status != OCRModelStatus.READY:
+    current_status = str(
+        model_status.get(
+            "status",
+            OCRModelStatus.NOT_STARTED.value,
+        )
+    ).strip().lower()
+
+    if current_status != OCRModelStatus.READY.value:
         return jsonify({
             "ok": False,
             "status": "loading",
-            "message": model_state.message,
+            "message": model_status.get(
+                "message",
+                "OCR model is not ready",
+            ),
         })
 
     result = read_manual_roi(
@@ -54,10 +69,13 @@ def api_read_manual_roi():
         x1=data.get("x1"),
         y1=data.get("y1"),
         x2=data.get("x2"),
-        y2=data.get("y2")
+        y2=data.get("y2"),
     )
 
-    print("[MANUAL OCR RESULT]", result)
+    print(
+        "[MANUAL OCR RESULT]",
+        result,
+    )
 
     return jsonify(result)
 
@@ -460,11 +478,23 @@ def api_mark_queue_failed():
 @worker_bp.get("/api/ocr/status")
 @require_api_key
 def get_ocr_status():
-    model_state = get_model_state()
+    model_status = read_model_status_file()
 
-    return jsonify(
-        {
-            "status": model_state.status.value,
-            "message": model_state.message,
-        }
-    )
+    return jsonify({
+        "status": model_status.get(
+            "status",
+            OCRModelStatus.NOT_STARTED.value,
+        ),
+        "message": model_status.get(
+            "message",
+            "OCR model preparation has not started",
+        ),
+        "error": model_status.get(
+            "error",
+            "",
+        ),
+        "updated_at": model_status.get(
+            "updated_at",
+            "",
+        ),
+    })

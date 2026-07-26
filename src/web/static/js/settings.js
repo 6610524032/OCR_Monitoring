@@ -1682,6 +1682,62 @@ async function readBoxWithOCR(box) {
 }
 
 
+async function readManualRoiWithOCR(
+    x1,
+    y1,
+    x2,
+    y2
+) {
+    if (!roiImage) {
+        return {
+            ok: false,
+            message: "ROI image element is missing."
+        };
+    }
+
+    const imageName =
+        roiImage.dataset.currentImage;
+
+    if (!imageName) {
+        return {
+            ok: false,
+            message: "Calibrated image name is missing."
+        };
+    }
+
+    const response = await fetch(
+        "/web_api/api/read_manual_roi",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type":
+                    "application/json"
+            },
+            body: JSON.stringify({
+                image: imageName,
+                x1: x1,
+                y1: y1,
+                x2: x2,
+                y2: y2
+            })
+        }
+    );
+
+    const result =
+        await response.json();
+
+    if (!response.ok) {
+        return {
+            ok: false,
+            message:
+                result.message ||
+                "Manual OCR request failed."
+        };
+    }
+
+    return result;
+}
+
 /* =====================================================
    ROI TABLE
 ===================================================== */
