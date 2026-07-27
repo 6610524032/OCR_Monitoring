@@ -1,8 +1,18 @@
+from src.logger import create_logger
 from src.server.database import get_connection
 from src.server.config import DB_PATH
 
 
+logger = create_logger(
+    "server.init_db"
+)
+
+
 def init_database():
+    logger.info(
+        "Initializing database schema"
+    )
+
     conn = get_connection()
     cur = conn.cursor()
 
@@ -61,6 +71,10 @@ def init_database():
         }
 
         if "sensor_api_key" not in user_tag_columns:
+            logger.info(
+                "Adding column sensor_api_key to user_tags"
+            )
+
             cur.execute("""
                 ALTER TABLE user_tags
                 ADD COLUMN sensor_api_key TEXT
@@ -93,6 +107,10 @@ def init_database():
         }
 
         if "camera_port" not in camera_columns:
+            logger.info(
+                "Adding column camera_port to camera"
+            )
+
             cur.execute("""
                 ALTER TABLE camera
                 ADD COLUMN camera_port INTEGER NOT NULL DEFAULT 554
@@ -125,6 +143,10 @@ def init_database():
         }
 
         if "captured_at" not in ocr_run_columns:
+            logger.info(
+                "Adding column captured_at to ocr_runs"
+            )
+
             cur.execute("""
                 ALTER TABLE ocr_runs
                 ADD COLUMN captured_at TEXT
@@ -204,6 +226,16 @@ def init_database():
 
         conn.commit()
 
+        logger.info(
+            "Database schema initialized successfully"
+        )
+
+    except Exception:
+        logger.exception(
+            "Database initialization failed"
+        )
+        raise
+
     finally:
         conn.close()
 
@@ -216,7 +248,9 @@ def ensure_database():
 
     init_database()
 
-    print("Database schema is ready.")
+    logger.info(
+        "Database is ready"
+    )
 
 
 if __name__ == "__main__":

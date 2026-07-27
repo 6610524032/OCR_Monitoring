@@ -7,10 +7,16 @@ through the OCR_ENGINE environment setting.
 
 from typing import Any, Optional
 
+from src.logger import create_logger
 from src.processing.ocr.providers.trocr_provider import (
     get_trocr_provider,
 )
 from src.server.config import OCR_ENGINE
+
+
+logger = create_logger(
+    "processing.ocr.factory"
+)
 
 
 SUPPORTED_OCR_ENGINES = {
@@ -35,6 +41,11 @@ def validate_ocr_engine() -> str:
             sorted(SUPPORTED_OCR_ENGINES)
         )
 
+        logger.error(
+            "Unsupported OCR engine: %s",
+            engine_name
+        )
+
         raise ValueError(
             f"Unsupported OCR engine: {engine_name}. "
             f"Supported engines: {supported}"
@@ -50,7 +61,16 @@ def create_ocr_provider() -> Any:
     engine_name = validate_ocr_engine()
 
     if engine_name == "trocr":
+        logger.info(
+            "Creating TrOCR provider"
+        )
+
         return get_trocr_provider()
+
+    logger.error(
+        "No OCR provider implementation for engine: %s",
+        engine_name
+    )
 
     raise ValueError(
         f"No provider implementation found "
@@ -74,6 +94,11 @@ def get_ocr_provider() -> Any:
         _OCR_PROVIDER is None
         or _ACTIVE_OCR_ENGINE != engine_name
     ):
+        logger.info(
+            "Initializing OCR provider: %s",
+            engine_name
+        )
+
         _OCR_PROVIDER = create_ocr_provider()
         _ACTIVE_OCR_ENGINE = engine_name
 

@@ -1,54 +1,91 @@
-from flask import Blueprint, jsonify, request
-import cv2
+from pathlib import Path
 from urllib.parse import quote
+
+import cv2
+from flask import Blueprint, jsonify, request
+
+from src.logger import create_logger
+from src.processing.rtsp_capture import (
+    capture_rtsp_image
+)
 from src.server.auth import require_api_key
+from src.server.config import RAW_IMAGES_DIR
 from src.server.repositories.camera_repository import (
     get_active_camera,
     save_camera_config
 )
-from pathlib import Path
 
-from src.processing.rtsp_capture import (
-    capture_rtsp_image
+
+logger = create_logger(
+    "server.routes.camera"
 )
 
-from src.server.config import RAW_IMAGES_DIR
+
 camera_bp = Blueprint(
     "camera",
     __name__
 )
 
 
-@camera_bp.route("/api/camera/config", methods=["GET"])
+@camera_bp.route(
+    "/api/camera/config",
+    methods=["GET"]
+)
 @require_api_key
 def api_camera_config():
+    try:
+        camera = get_active_camera()
 
-    camera = get_active_camera()
+        if camera is None:
+            logger.info(
+                "Camera configuration not found"
+            )
 
-    if camera is None:
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Camera configuration not found"
+                )
+            }), 404
+
+        logger.info(
+            "Camera configuration loaded"
+        )
+
+        return jsonify({
+            "ok": True,
+            "camera": {
+                "camera_name": camera["camera_name"],
+                "camera_ip": camera["camera_ip"],
+                "camera_port": camera["camera_port"],
+                "camera_username": camera["camera_username"],
+                "camera_password": camera["camera_password"],
+                "rtsp_path": camera["rtsp_path"]
+            }
+        })
+
+    except Exception:
+        logger.exception(
+            "Failed to load camera configuration"
+        )
+
         return jsonify({
             "ok": False,
-            "message": "Camera configuration not found"
-        }), 404
-
-    return jsonify({
-        "ok": True,
-        "camera": {
-            "camera_name": camera["camera_name"],
-            "camera_ip": camera["camera_ip"],
-            "camera_port": camera["camera_port"],
-            "camera_username": camera["camera_username"],
-            "camera_password": camera["camera_password"],
-            "rtsp_path": camera["rtsp_path"]
-        }
-    })
+            "message": (
+                "Failed to load camera configuration"
+            )
+        }), 500
 
 
-@camera_bp.route("/api/camera/config", methods=["POST"])
+@camera_bp.route(
+    "/api/camera/config",
+    methods=["POST"]
+)
 @require_api_key
 def api_save_camera_config():
-
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(
+        silent=True
+    ) or {}
 
     required_fields = [
         "camera_name",
@@ -62,10 +99,16 @@ def api_save_camera_config():
     missing_fields = [
         field
         for field in required_fields
-        if str(data.get(field, "")).strip() == ""
+        if str(
+            data.get(field, "")
+        ).strip() == ""
     ]
 
     if missing_fields:
+        logger.warning(
+            "Camera configuration is incomplete"
+        )
+
         return jsonify({
             "ok": False,
             "message": (
@@ -75,102 +118,161 @@ def api_save_camera_config():
         }), 400
 
     camera_data = {
-
         "camera_name": str(
             data["camera_name"]
         ).strip(),
-
         "camera_ip": str(
             data["camera_ip"]
         ).strip(),
-
         "camera_port": int(
             data["camera_port"]
         ),
-
         "camera_username": str(
             data["camera_username"]
         ).strip(),
-
         "camera_password": str(
             data["camera_password"]
         ),
-
         "rtsp_path": str(
             data["rtsp_path"]
         ).strip()
-
     }
 
     try:
+        save_camera_config(
+            camera_data
+        )
 
-        save_camera_config(camera_data)
+        logger.info(
+            "Camera configuration saved"
+        )
 
-    except Exception as error:
+        return jsonify({
+            "ok": True,
+            "message": (
+                "Camera configuration saved"
+            )
+        })
 
-        print(
-            "Save camera configuration error:",
-            error
+    except Exception:
+        logger.exception(
+            "Failed to save camera configuration"
         )
 
         return jsonify({
             "ok": False,
-            "message": "Cannot save camera configuration"
+            "message": (
+                "Cannot save camera configuration"
+            )
         }), 500
 
-    return jsonify({
-        "ok": True,
-        "message": "Camera configuration saved"
-    })
 
-@camera_bp.route("/api/camera/test", methods=["POST"])
+@camera_bp.route(
+    "/api/camera/test",
+    methods=["POST"]
+)
 @require_api_key
 def api_test_camera():
-
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(
+        silent=True
+    ) or {}
 
     try:
-        camera_ip = str(data.get("camera_ip", "")).strip()
-        camera_port = int(data.get("camera_port", 554))
-        camera_username = str(data.get("camera_username", "")).strip()
-        camera_password = str(data.get("camera_password", "")).strip()
-        rtsp_path = str(data.get("rtsp_path", "")).strip()
+        camera_ip = str(
+            data.get(
+                "camera_ip",
+                ""
+            )
+        ).strip()
+
+        camera_port = int(
+            data.get(
+                "camera_port",
+                554
+            )
+        )
+
+        camera_username = str(
+            data.get(
+                "camera_username",
+                ""
+            )
+        ).strip()
+
+        camera_password = str(
+            data.get(
+                "camera_password",
+                ""
+            )
+        ).strip()
+
+        rtsp_path = str(
+            data.get(
+                "rtsp_path",
+                ""
+            )
+        ).strip()
 
         if not rtsp_path.startswith("/"):
             rtsp_path = "/" + rtsp_path
 
-        username = quote(camera_username, safe="")
-        password = quote(camera_password, safe="")
+        username = quote(
+            camera_username,
+            safe=""
+        )
+
+        password = quote(
+            camera_password,
+            safe=""
+        )
 
         rtsp_url = (
             f"rtsp://{username}:{password}"
-            f"@{camera_ip}:{camera_port}{rtsp_path}"
+            f"@{camera_ip}:{camera_port}"
+            f"{rtsp_path}"
         )
 
-        cap = cv2.VideoCapture(rtsp_url)
+        cap = cv2.VideoCapture(
+            rtsp_url
+        )
 
         ok, _ = cap.read()
 
         cap.release()
 
         if ok:
+            logger.info(
+                "Camera connection test succeeded"
+            )
+
             return jsonify({
                 "ok": True,
-                "message": "Camera connected successfully."
+                "message": (
+                    "Camera connected successfully."
+                )
             })
 
+        logger.warning(
+            "Camera connection test failed"
+        )
+
         return jsonify({
             "ok": False,
-            "message": "Cannot connect to camera."
+            "message": (
+                "Cannot connect to camera."
+            )
         })
 
-    except Exception as error:
-
-        print("Camera test error:", error)
+    except Exception:
+        logger.exception(
+            "Camera connection test failed"
+        )
 
         return jsonify({
             "ok": False,
-            "message": str(error)
+            "message": (
+                "Camera connection test failed"
+            )
         }), 500
 
 
@@ -180,19 +282,32 @@ def api_test_camera():
 )
 @require_api_key
 def api_capture_image():
-
     try:
-        capture_result = capture_rtsp_image()
+        capture_result = (
+            capture_rtsp_image()
+        )
 
         if capture_result is None:
+            logger.error(
+                "Capture returned no result"
+            )
+
             return jsonify({
                 "ok": False,
-                "message": "Cannot capture image."
+                "message": (
+                    "Cannot capture image."
+                )
             }), 500
 
-        # ต้องตรวจผลลัพธ์จาก capture_rtsp_image ก่อน
-        # เพราะกรณีผิดพลาดจะไม่มี image_path
         if not capture_result.get("ok"):
+            logger.warning(
+                "Capture failed at stage '%s'",
+                capture_result.get(
+                    "stage",
+                    "unknown"
+                )
+            )
+
             return jsonify({
                 "ok": False,
                 "stage": capture_result.get(
@@ -218,6 +333,10 @@ def api_capture_image():
         )
 
         if not image_path:
+            logger.error(
+                "Capture result does not contain image path"
+            )
+
             return jsonify({
                 "ok": False,
                 "stage": "capture_result",
@@ -232,12 +351,15 @@ def api_capture_image():
         ).resolve()
 
         if not image_path_obj.exists():
+            logger.error(
+                "Captured image file does not exist"
+            )
+
             return jsonify({
                 "ok": False,
                 "stage": "verify_image",
                 "message": (
-                    "Captured image file does not exist: "
-                    + str(image_path_obj)
+                    "Captured image file does not exist."
                 )
             }), 500
 
@@ -248,30 +370,30 @@ def api_capture_image():
         try:
             relative_image_path = (
                 image_path_obj
-                .relative_to(raw_images_dir)
+                .relative_to(
+                    raw_images_dir
+                )
                 .as_posix()
             )
 
         except ValueError:
-            date_folder = (
-                image_path_obj.parent.name
-            )
-
             relative_image_path = (
-                date_folder
+                image_path_obj.parent.name
                 + "/"
                 + image_path_obj.name
             )
 
-        image_url = (
-            "/raw_images/"
-            + relative_image_path
+        logger.info(
+            "Image captured successfully"
         )
 
         return jsonify({
             "ok": True,
             "image": relative_image_path,
-            "image_url": image_url,
+            "image_url": (
+                "/raw_images/"
+                + relative_image_path
+            ),
             "captured_at": captured_at,
             "capture_timestamp": capture_timestamp,
             "message": (
@@ -279,9 +401,15 @@ def api_capture_image():
             )
         })
 
-    except Exception as error:
+    except Exception:
+        logger.exception(
+            "Unexpected capture route error"
+        )
+
         return jsonify({
             "ok": False,
             "stage": "capture_route",
-            "message": str(error)
+            "message": (
+                "Unexpected server error"
+            )
         }), 500

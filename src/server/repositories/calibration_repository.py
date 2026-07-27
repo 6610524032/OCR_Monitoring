@@ -1,6 +1,12 @@
 import sqlite3
 
+from src.logger import create_logger
 from src.server.database import get_connection
+
+
+logger = create_logger(
+    "server.repositories.calibration"
+)
 
 
 def get_active_calibration():
@@ -27,9 +33,22 @@ def get_active_calibration():
         row = cur.fetchone()
 
         if row is None:
+            logger.info(
+                "No active calibration found"
+            )
             return None
 
+        logger.info(
+            "Active calibration loaded"
+        )
+
         return dict(row)
+
+    except Exception:
+        logger.exception(
+            "Failed to load active calibration"
+        )
+        raise
 
     finally:
         conn.close()
@@ -89,8 +108,17 @@ def save_calibration_data(data):
 
         conn.commit()
 
+        logger.info(
+            "Calibration saved successfully"
+        )
+
     except Exception:
         conn.rollback()
+
+        logger.exception(
+            "Failed to save calibration"
+        )
+
         raise
 
     finally:

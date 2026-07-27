@@ -24,7 +24,8 @@ huggingface/
 
 # Logs
 *.log
-logs/
+logs/*
+!logs/.gitkeep
 
 # IDE
 .vscode/
@@ -43,7 +44,21 @@ tmp/
 temp/
 
 # Runtime generated data
-data/raw_images/
-data/calibrated_images/
-data/incoming/
-data/database/
+
+# Images
+data/raw_images/**/*.jpg
+data/raw_images/**/*.jpeg
+data/raw_images/**/*.png
+
+data/calibrated_images/**/*.jpg
+data/calibrated_images/**/*.jpeg
+data/calibrated_images/**/*.png
+
+data/incoming/**/*.jpg
+data/incoming/**/*.jpeg
+data/incoming/**/*.png
+
+# Database
+data/database/*.db
+data/database/*.sqlite
+data/database/*.sqlite3

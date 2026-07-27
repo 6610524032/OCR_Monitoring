@@ -4,9 +4,15 @@ from urllib.parse import quote
 
 import cv2
 
+from src.logger import create_logger
 from src.server.config import RAW_IMAGES_DIR
 from src.server.repositories.camera_repository import (
     get_active_camera
+)
+
+
+logger = create_logger(
+    "processing.rtsp_capture"
 )
 
 
@@ -31,6 +37,16 @@ def build_rtsp_url(camera):
         camera.get("rtsp_path", "")
     ).strip()
 
+    if not camera_ip:
+        raise ValueError(
+            "Camera IP is empty"
+        )
+
+    if not rtsp_path:
+        raise ValueError(
+            "RTSP path is empty"
+        )
+
     if not rtsp_path.startswith("/"):
         rtsp_path = "/" + rtsp_path
 
@@ -52,7 +68,9 @@ def build_rtsp_url(camera):
 
 
 def capture_rtsp_image():
-    captured_at = datetime.now().astimezone()
+    captured_at = (
+        datetime.now().astimezone()
+    )
 
     date_folder = captured_at.strftime(
         "%Y-%m-%d"
@@ -70,6 +88,11 @@ def capture_rtsp_image():
         )
 
     except Exception as error:
+        logger.exception(
+            "Cannot create raw image directory: %s",
+            save_dir
+        )
+
         return {
             "ok": False,
             "stage": "create_directory",
@@ -83,6 +106,10 @@ def capture_rtsp_image():
         camera = get_active_camera()
 
     except Exception as error:
+        logger.exception(
+            "Cannot load active camera configuration"
+        )
+
         return {
             "ok": False,
             "stage": "camera_config",
@@ -94,6 +121,10 @@ def capture_rtsp_image():
         }
 
     if camera is None:
+        logger.warning(
+            "RTSP capture skipped because no active camera was found"
+        )
+
         return {
             "ok": False,
             "stage": "camera_config",
@@ -103,12 +134,44 @@ def capture_rtsp_image():
             )
         }
 
+    camera_name = str(
+        camera.get(
+            "camera_name",
+            camera.get(
+                "name",
+                "Unnamed camera"
+            )
+        )
+    )
+
+    camera_ip = str(
+        camera.get(
+            "camera_ip",
+            ""
+        )
+    ).strip()
+
+    camera_port = camera.get(
+        "camera_port",
+        554
+    )
+
     try:
         rtsp_url = build_rtsp_url(
             camera
         )
 
     except Exception as error:
+        logger.exception(
+            (
+                "Cannot build RTSP URL: "
+                "camera=%s, ip=%s, port=%s"
+            ),
+            camera_name,
+            camera_ip,
+            camera_port
+        )
+
         return {
             "ok": False,
             "stage": "build_rtsp_url",
@@ -117,6 +180,16 @@ def capture_rtsp_image():
                 + str(error)
             )
         }
+
+    logger.info(
+        (
+            "Starting RTSP capture: "
+            "camera=%s, ip=%s, port=%s"
+        ),
+        camera_name,
+        camera_ip,
+        camera_port
+    )
 
     cap = None
 
@@ -127,6 +200,16 @@ def capture_rtsp_image():
         )
 
         if not cap.isOpened():
+            logger.error(
+                (
+                    "Cannot open RTSP stream: "
+                    "camera=%s, ip=%s, port=%s"
+                ),
+                camera_name,
+                camera_ip,
+                camera_port
+            )
+
             return {
                 "ok": False,
                 "stage": "open_rtsp",
@@ -137,8 +220,12 @@ def capture_rtsp_image():
 
         success = False
         frame = None
+        successful_attempt = None
 
-        for attempt in range(1, 31):
+        for attempt in range(
+            1,
+            31
+        ):
             success, frame = cap.read()
 
             if (
@@ -146,20 +233,28 @@ def capture_rtsp_image():
                 and frame is not None
                 and frame.size > 0
             ):
-                print(
-                    "[RTSP CAPTURE] "
-                    f"Frame received on "
-                    f"attempt {attempt}"
-                )
+                successful_attempt = attempt
                 break
 
-            time.sleep(0.2)
+            time.sleep(
+                0.2
+            )
 
         if (
             not success
             or frame is None
             or frame.size == 0
         ):
+            logger.error(
+                (
+                    "RTSP stream opened but no valid frame "
+                    "was received after 30 attempts: "
+                    "camera=%s, ip=%s"
+                ),
+                camera_name,
+                camera_ip
+            )
+
             return {
                 "ok": False,
                 "stage": "read_frame",
@@ -169,7 +264,25 @@ def capture_rtsp_image():
                 )
             }
 
+        logger.info(
+            (
+                "RTSP frame received: "
+                "camera=%s, attempt=%s"
+            ),
+            camera_name,
+            successful_attempt
+        )
+
     except Exception as error:
+        logger.exception(
+            (
+                "Unexpected RTSP capture error: "
+                "camera=%s, ip=%s"
+            ),
+            camera_name,
+            camera_ip
+        )
+
         return {
             "ok": False,
             "stage": "rtsp_exception",
@@ -187,9 +300,11 @@ def capture_rtsp_image():
         captured_at.timestamp()
     )
 
-    filename_timestamp = captured_at.strftime(
-        "%Y-%m-%d_%H-%M-%S_%f"
-    )[:-3]
+    filename_timestamp = (
+        captured_at.strftime(
+            "%Y-%m-%d_%H-%M-%S_%f"
+        )[:-3]
+    )
 
     image_path = (
         save_dir
@@ -203,6 +318,11 @@ def capture_rtsp_image():
         )
 
     except Exception as error:
+        logger.exception(
+            "Image saving exception: %s",
+            image_path
+        )
+
         return {
             "ok": False,
             "stage": "save_image",
@@ -213,6 +333,11 @@ def capture_rtsp_image():
         }
 
     if not saved:
+        logger.error(
+            "OpenCV could not save RTSP image: %s",
+            image_path
+        )
+
         return {
             "ok": False,
             "stage": "save_image",
@@ -223,6 +348,14 @@ def capture_rtsp_image():
         }
 
     if not image_path.exists():
+        logger.error(
+            (
+                "RTSP image file was not found "
+                "after saving: %s"
+            ),
+            image_path
+        )
+
         return {
             "ok": False,
             "stage": "verify_image",
@@ -233,20 +366,34 @@ def capture_rtsp_image():
             )
         }
 
-    print(
-        "[RTSP CAPTURE] "
-        f"Image captured: {image_path}"
+    logger.info(
+        (
+            "RTSP image captured successfully: "
+            "camera=%s, image=%s, "
+            "capture_timestamp=%s"
+        ),
+        camera_name,
+        image_path,
+        capture_timestamp
     )
 
     return {
         "ok": True,
-        "image_path": str(image_path),
-        "captured_at": captured_at.isoformat(),
-        "capture_timestamp": capture_timestamp
+        "image_path": str(
+            image_path
+        ),
+        "captured_at": (
+            captured_at.isoformat()
+        ),
+        "capture_timestamp": (
+            capture_timestamp
+        )
     }
 
 
 if __name__ == "__main__":
+    result = capture_rtsp_image()
+
     print(
-        capture_rtsp_image()
+        result
     )

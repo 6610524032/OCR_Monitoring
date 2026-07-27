@@ -2,6 +2,13 @@ from typing import Any
 
 import requests
 
+from src.logger import create_logger
+
+
+logger = create_logger(
+    "processing.vulcan_client"
+)
+
 
 VULCAN_SENSOR_DATA_URL = (
     "https://vulcan.mtec.or.th/"
@@ -38,18 +45,33 @@ def build_vulcan_payload(
         value = item.get("value")
 
         if not api_key:
+            logger.error(
+                "Missing API key for sensor %d",
+                index + 1,
+            )
+
             raise ValueError(
                 f"Sensor number {index + 1} "
                 "does not have an API key"
             )
 
         if capture_timestamp is None:
+            logger.error(
+                "Missing capture timestamp for sensor %d",
+                index + 1,
+            )
+
             raise ValueError(
                 f"Sensor number {index + 1} "
                 "does not have a capture timestamp"
             )
 
         if value is None:
+            logger.error(
+                "Missing value for sensor %d",
+                index + 1,
+            )
+
             raise ValueError(
                 f"Sensor number {index + 1} "
                 "does not have a value"
@@ -59,15 +81,29 @@ def build_vulcan_payload(
             timestamp_value = int(
                 capture_timestamp
             )
+
         except (TypeError, ValueError) as error:
+            logger.error(
+                "Invalid capture timestamp for sensor %d",
+                index + 1,
+            )
+
             raise ValueError(
                 f"Invalid capture timestamp for "
                 f"sensor number {index + 1}"
             ) from error
 
         try:
-            numeric_value = float(value)
+            numeric_value = float(
+                value
+            )
+
         except (TypeError, ValueError) as error:
+            logger.error(
+                "Invalid sensor value for sensor %d",
+                index + 1,
+            )
+
             raise ValueError(
                 f"Invalid sensor value for "
                 f"sensor number {index + 1}"
@@ -78,24 +114,33 @@ def build_vulcan_payload(
             "data": [
                 {
                     "timestamp": timestamp_value,
-                    "value": numeric_value
+                    "value": numeric_value,
                 }
-            ]
+            ],
         })
 
     if not sensors:
+        logger.error(
+            "No sensor values were provided"
+        )
+
         raise ValueError(
             "No sensor values were provided"
         )
 
+    logger.info(
+        "Built Vulcan payload for %d sensor(s)",
+        len(sensors),
+    )
+
     return {
-        "sensors": sensors
+        "sensors": sensors,
     }
 
 
 def send_sensor_values_to_vulcan(
     sensor_values: list[dict[str, Any]],
-    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """
     Build and send sensor values to Vulcan.
@@ -106,22 +151,36 @@ def send_sensor_values_to_vulcan(
             sensor_values
         )
 
+        logger.info(
+            "Sending %d sensor(s) to Vulcan",
+            len(sensor_values),
+        )
+
         response = requests.post(
             VULCAN_SENSOR_DATA_URL,
             json=payload,
-            timeout=timeout_seconds
+            timeout=timeout_seconds,
         )
 
     except ValueError as error:
+        logger.error(
+            "Cannot build Vulcan payload: %s",
+            error,
+        )
+
         return {
             "ok": False,
             "message": str(error),
             "status_code": None,
             "payload": None,
-            "response": None
+            "response": None,
         }
 
     except requests.Timeout:
+        logger.error(
+            "Vulcan API request timed out"
+        )
+
         return {
             "ok": False,
             "message": (
@@ -129,10 +188,15 @@ def send_sensor_values_to_vulcan(
             ),
             "status_code": None,
             "payload": payload,
-            "response": None
+            "response": None,
         }
 
     except requests.RequestException as error:
+        logger.error(
+            "Cannot connect to Vulcan API: %s",
+            error,
+        )
+
         return {
             "ok": False,
             "message": (
@@ -141,15 +205,21 @@ def send_sensor_values_to_vulcan(
             ),
             "status_code": None,
             "payload": payload,
-            "response": None
+            "response": None,
         }
 
     try:
         response_data = response.json()
+
     except ValueError:
         response_data = response.text
 
     if not response.ok:
+        logger.error(
+            "Vulcan API returned HTTP %d",
+            response.status_code,
+        )
+
         return {
             "ok": False,
             "message": (
@@ -157,8 +227,13 @@ def send_sensor_values_to_vulcan(
             ),
             "status_code": response.status_code,
             "payload": payload,
-            "response": response_data
+            "response": response_data,
         }
+
+    logger.info(
+        "Successfully sent %d sensor(s) to Vulcan",
+        len(sensor_values),
+    )
 
     return {
         "ok": True,
@@ -167,5 +242,5 @@ def send_sensor_values_to_vulcan(
         ),
         "status_code": response.status_code,
         "payload": payload,
-        "response": response_data
+        "response": response_data,
     }

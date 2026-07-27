@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify, request
 
+from src.logger import create_logger
+
 from src.processing.calibration import (
     create_calibration_preview,
     get_latest_file
@@ -21,82 +23,200 @@ from src.server.repositories.tag_repository import (
     get_user_tags_for_settings
 )
 
+
+logger = create_logger(
+    "server.routes.calibration"
+)
+
+
 calibration_bp = Blueprint(
     "calibration",
     __name__
 )
 
 
-@calibration_bp.route("/api/save_calibration", methods=["POST"])
+@calibration_bp.route(
+    "/api/save_calibration",
+    methods=["POST"]
+)
 @require_api_key
 def api_save_calibration():
     data = request.json or {}
 
-    save_calibration_data(data)
+    try:
+        save_calibration_data(data)
 
-    return jsonify({
-        "ok": True
-    })
+        logger.info(
+            "Calibration saved successfully"
+        )
+
+        return jsonify({
+            "ok": True
+        })
+
+    except Exception:
+        logger.exception(
+            "Failed to save calibration"
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": "Failed to save calibration"
+        }), 500
 
 
-@calibration_bp.route("/api/test_calibration", methods=["POST"])
+@calibration_bp.route(
+    "/api/test_calibration",
+    methods=["POST"]
+)
 @require_api_key
 def api_test_calibration():
-    calibration = get_active_calibration()
+    try:
+        calibration = (
+            get_active_calibration()
+        )
 
-    result = create_calibration_preview(
-        calibration=calibration
-    )
+        result = (
+            create_calibration_preview(
+                calibration=calibration
+            )
+        )
 
-    return jsonify(result)
+        logger.info(
+            "Calibration preview created"
+        )
+
+        return jsonify(result)
+
+    except Exception:
+        logger.exception(
+            "Failed to create calibration preview"
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Failed to create calibration preview"
+            )
+        }), 500
 
 
-@calibration_bp.route("/api/latest_calibrated_image")
+@calibration_bp.route(
+    "/api/latest_calibrated_image"
+)
 @require_api_key
 def api_latest_calibrated_image():
-    latest_calibrated_image = get_latest_file(
-        CALIBRATED_IMAGES_DIR
-    )
+    try:
+        latest_calibrated_image = (
+            get_latest_file(
+                CALIBRATED_IMAGES_DIR
+            )
+        )
 
-    if latest_calibrated_image is None:
+        if latest_calibrated_image is None:
+            logger.info(
+                "No calibrated image found"
+            )
+
+            return jsonify({
+                "ok": False,
+                "image": None
+            })
+
         return jsonify({
-            "ok": False,
-            "image": None
+            "ok": True,
+            "image": latest_calibrated_image,
+            "image_url":
+                "/calibrated_images/"
+                + latest_calibrated_image
         })
 
-    return jsonify({
-        "ok": True,
-        "image": latest_calibrated_image,
-        "image_url": "/calibrated_images/" + latest_calibrated_image
-    })
+    except Exception:
+        logger.exception(
+            "Failed to load latest calibrated image"
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Failed to load latest calibrated image"
+            )
+        }), 500
 
 
-@calibration_bp.route("/api/latest_raw_image")
+@calibration_bp.route(
+    "/api/latest_raw_image"
+)
 @require_api_key
 def api_latest_raw_image():
-    latest_image = get_latest_file(RAW_IMAGES_DIR)
+    try:
+        latest_image = get_latest_file(
+            RAW_IMAGES_DIR
+        )
 
-    if latest_image is None:
+        if latest_image is None:
+            logger.info(
+                "No raw image found"
+            )
+
+            return jsonify({
+                "ok": False,
+                "image": None
+            })
+
         return jsonify({
-            "ok": False,
-            "image": None
+            "ok": True,
+            "image": latest_image,
+            "image_url":
+                "/raw_images/"
+                + latest_image
         })
 
-    return jsonify({
-        "ok": True,
-        "image": latest_image,
-        "image_url": "/raw_images/" + latest_image
-    })
+    except Exception:
+        logger.exception(
+            "Failed to load latest raw image"
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Failed to load latest raw image"
+            )
+        }), 500
 
 
-@calibration_bp.route("/api/settings/bootstrap")
+@calibration_bp.route(
+    "/api/settings/bootstrap"
+)
 @require_api_key
 def api_settings_bootstrap():
-    calibration = get_active_calibration()
-    user_tags = get_user_tags_for_settings()
+    try:
+        calibration = (
+            get_active_calibration()
+        )
 
-    return jsonify({
-        "ok": True,
-        "calibration": calibration,
-        "user_tags": user_tags
-    })
+        user_tags = (
+            get_user_tags_for_settings()
+        )
+
+        logger.info(
+            "Settings bootstrap loaded"
+        )
+
+        return jsonify({
+            "ok": True,
+            "calibration": calibration,
+            "user_tags": user_tags
+        })
+
+    except Exception:
+        logger.exception(
+            "Failed to load settings bootstrap"
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Failed to load settings"
+            )
+        }), 500

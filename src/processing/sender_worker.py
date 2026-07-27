@@ -1,12 +1,18 @@
 import time
 from collections import defaultdict
 
+from src.logger import create_logger
 from src.server.api_client import (
     ApiClientError,
     api_post
 )
 from src.server.integrations.vulcan_client import (
     send_sensor_values_to_vulcan
+)
+
+
+logger = create_logger(
+    "processing.sender_worker"
 )
 
 
@@ -23,6 +29,14 @@ def claim_queue(limit=BATCH_SIZE):
     )
 
     if not response.get("ok"):
+        logger.error(
+            "Cannot claim outbound queue: %s",
+            response.get(
+                "message",
+                "Unknown error"
+            )
+        )
+
         raise ApiClientError(
             response.get(
                 "message",
@@ -30,10 +44,18 @@ def claim_queue(limit=BATCH_SIZE):
             )
         )
 
-    return response.get(
+    queue_items = response.get(
         "queue_items",
         []
     )
+
+    if queue_items:
+        logger.info(
+            "Claimed %d outbound queue item(s)",
+            len(queue_items)
+        )
+
+    return queue_items
 
 
 def mark_sent(queue_ids, result):
@@ -51,12 +73,25 @@ def mark_sent(queue_ids, result):
     )
 
     if not response.get("ok"):
+        logger.error(
+            "Cannot mark queue as sent: %s",
+            response.get(
+                "message",
+                "Unknown error"
+            )
+        )
+
         raise ApiClientError(
             response.get(
                 "message",
                 "Cannot mark queue as sent"
             )
         )
+
+    logger.info(
+        "Marked %d queue item(s) as sent",
+        len(queue_ids)
+    )
 
 
 def mark_failed(queue_ids, result):
@@ -78,6 +113,14 @@ def mark_failed(queue_ids, result):
     )
 
     if not response.get("ok"):
+        logger.error(
+            "Cannot mark queue as failed: %s",
+            response.get(
+                "message",
+                "Unknown error"
+            )
+        )
+
         raise ApiClientError(
             response.get(
                 "message",
@@ -85,12 +128,16 @@ def mark_failed(queue_ids, result):
             )
         )
 
+    logger.warning(
+        "Marked %d queue item(s) as failed",
+        len(queue_ids)
+    )
+
 
 def process_once():
     queue_items = claim_queue()
 
     if not queue_items:
-        print("No outbound queue")
         return
 
     sensor_groups = defaultdict(list)
@@ -102,6 +149,11 @@ def process_once():
         ).strip()
 
         if not sensor_api_key:
+            logger.warning(
+                "Queue ID %s does not have a sensor API key",
+                item["id"]
+            )
+
             mark_failed(
                 queue_ids=[item["id"]],
                 result={
@@ -113,6 +165,7 @@ def process_once():
                     "response": None
                 }
             )
+
             continue
 
         sensor_groups[sensor_api_key].append({
@@ -144,9 +197,9 @@ def process_once():
                 result=result
             )
 
-            print(
-                f"Sent {len(sensor_values)} "
-                "sensor value(s) to Vulcan"
+            logger.info(
+                "Sent %d sensor value(s) to Vulcan",
+                len(sensor_values)
             )
 
         else:
@@ -155,8 +208,8 @@ def process_once():
                 result=result
             )
 
-            print(
-                "[VULCAN SEND FAILED]",
+            logger.error(
+                "Vulcan send failed: %s",
                 result.get(
                     "message",
                     "Unknown error"
@@ -165,17 +218,17 @@ def process_once():
 
 
 def sender_loop():
-    print("Sender Worker Started")
+    logger.info(
+        "Sender Worker started"
+    )
 
     while True:
         try:
             process_once()
 
-        except Exception as error:
-            print(
-                "[SENDER ERROR]",
-                type(error).__name__,
-                str(error)
+        except Exception:
+            logger.exception(
+                "Unexpected sender worker error"
             )
 
         time.sleep(

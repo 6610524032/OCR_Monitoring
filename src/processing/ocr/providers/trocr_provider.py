@@ -14,6 +14,7 @@ from transformers import (
     VisionEncoderDecoderModel,
 )
 
+from src.logger import create_logger
 from src.processing.ocr.model_status import (
     OCRModelStatus,
     set_model_status,
@@ -21,6 +22,11 @@ from src.processing.ocr.model_status import (
 from src.server.config import (
     MODEL_CACHE_DIR,
     OCR_MODEL_NAME,
+)
+
+
+logger = create_logger(
+    "processing.ocr.trocr_provider"
 )
 
 
@@ -42,18 +48,31 @@ class TrOCRProvider:
         """
         Prepare Hugging Face cache directory.
         """
-        MODEL_CACHE_DIR.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        try:
+            MODEL_CACHE_DIR.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
-        os.environ["HF_HOME"] = str(
-            MODEL_CACHE_DIR
-        )
+            os.environ["HF_HOME"] = str(
+                MODEL_CACHE_DIR
+            )
 
-        os.environ[
-            "HUGGINGFACE_HUB_CACHE"
-        ] = str(
+            os.environ[
+                "HUGGINGFACE_HUB_CACHE"
+            ] = str(
+                MODEL_CACHE_DIR
+            )
+
+        except Exception:
+            logger.exception(
+                "Cannot prepare TrOCR model cache directory: %s",
+                MODEL_CACHE_DIR
+            )
+            raise
+
+        logger.info(
+            "TrOCR cache directory prepared: %s",
             MODEL_CACHE_DIR
         )
 
@@ -66,32 +85,69 @@ class TrOCRProvider:
         Try local cache first.
         Download automatically if necessary.
         """
+        logger.info(
+            "Loading TrOCR processor from local cache"
+        )
 
         try:
-            return TrOCRProcessor.from_pretrained(
-                OCR_MODEL_NAME,
-                cache_dir=str(
-                    MODEL_CACHE_DIR,
-                ),
-                local_files_only=True,
-                use_fast=False,
+            processor = (
+                TrOCRProcessor.from_pretrained(
+                    OCR_MODEL_NAME,
+                    cache_dir=str(
+                        MODEL_CACHE_DIR,
+                    ),
+                    local_files_only=True,
+                    use_fast=False,
+                )
             )
 
-        except Exception:
+            logger.info(
+                "TrOCR processor loaded from local cache"
+            )
+
+            return processor
+
+        except Exception as cache_error:
+            logger.warning(
+                (
+                    "TrOCR processor was not available "
+                    "in local cache. Download will be attempted: %s"
+                ),
+                str(cache_error)
+            )
 
             set_model_status(
                 OCRModelStatus.DOWNLOADING,
                 "Downloading TrOCR processor",
             )
 
-            return TrOCRProcessor.from_pretrained(
-                OCR_MODEL_NAME,
-                cache_dir=str(
-                    MODEL_CACHE_DIR,
-                ),
-                local_files_only=False,
-                use_fast=False,
+        logger.info(
+            "Downloading TrOCR processor"
+        )
+
+        try:
+            processor = (
+                TrOCRProcessor.from_pretrained(
+                    OCR_MODEL_NAME,
+                    cache_dir=str(
+                        MODEL_CACHE_DIR,
+                    ),
+                    local_files_only=False,
+                    use_fast=False,
+                )
             )
+
+        except Exception:
+            logger.exception(
+                "Failed to download TrOCR processor"
+            )
+            raise
+
+        logger.info(
+            "TrOCR processor downloaded successfully"
+        )
+
+        return processor
 
     def _load_model(
         self,
@@ -102,9 +158,11 @@ class TrOCRProvider:
         Try local cache first.
         Download automatically if necessary.
         """
+        logger.info(
+            "Loading TrOCR model from local cache"
+        )
 
         try:
-
             model = (
                 VisionEncoderDecoderModel.from_pretrained(
                     OCR_MODEL_NAME,
@@ -115,24 +173,57 @@ class TrOCRProvider:
                 )
             )
 
-        except Exception:
+            logger.info(
+                "TrOCR model loaded from local cache"
+            )
+
+        except Exception as cache_error:
+            logger.warning(
+                (
+                    "TrOCR model was not available "
+                    "in local cache. Download will be attempted: %s"
+                ),
+                str(cache_error)
+            )
 
             set_model_status(
                 OCRModelStatus.DOWNLOADING,
                 "Downloading TrOCR model",
             )
 
-            model = (
-                VisionEncoderDecoderModel.from_pretrained(
-                    OCR_MODEL_NAME,
-                    cache_dir=str(
-                        MODEL_CACHE_DIR,
-                    ),
-                    local_files_only=False,
-                )
+            logger.info(
+                "Downloading TrOCR model"
             )
 
-        model.eval()
+            try:
+                model = (
+                    VisionEncoderDecoderModel.from_pretrained(
+                        OCR_MODEL_NAME,
+                        cache_dir=str(
+                            MODEL_CACHE_DIR,
+                        ),
+                        local_files_only=False,
+                    )
+                )
+
+            except Exception:
+                logger.exception(
+                    "Failed to download TrOCR model"
+                )
+                raise
+
+            logger.info(
+                "TrOCR model downloaded successfully"
+            )
+
+        try:
+            model.eval()
+
+        except Exception:
+            logger.exception(
+                "Cannot switch TrOCR model to evaluation mode"
+            )
+            raise
 
         return model
 
@@ -145,7 +236,6 @@ class TrOCRProvider:
         """
         Load the TrOCR processor and model into memory.
         """
-
         if (
             self.processor is not None
             and self.model is not None
@@ -155,20 +245,18 @@ class TrOCRProvider:
                 self.model,
             )
 
-        try:
+        logger.info(
+            "Starting TrOCR model preparation: model=%s",
+            OCR_MODEL_NAME
+        )
 
+        try:
             set_model_status(
                 OCRModelStatus.CHECKING,
                 "Checking TrOCR model cache",
             )
 
             self._prepare_cache()
-
-            print(f"[OCR] Model name = {OCR_MODEL_NAME}")
-
-            print(
-                "[OCR][TrOCR] Loading processor..."
-            )
 
             set_model_status(
                 OCRModelStatus.LOADING,
@@ -179,12 +267,8 @@ class TrOCRProvider:
                 self._load_processor()
             )
 
-            print(
-                "[OCR][TrOCR] Processor loaded"
-            )
-
-            print(
-                "[OCR][TrOCR] Loading model..."
+            logger.info(
+                "TrOCR processor is ready"
             )
 
             set_model_status(
@@ -196,13 +280,17 @@ class TrOCRProvider:
                 self._load_model()
             )
 
-            print(
-                "[OCR][TrOCR] Model loaded"
+            logger.info(
+                "TrOCR model is loaded into memory"
             )
 
             set_model_status(
                 OCRModelStatus.READY,
                 "TrOCR model is ready",
+            )
+
+            logger.info(
+                "TrOCR model preparation completed successfully"
             )
 
             return (
@@ -211,14 +299,18 @@ class TrOCRProvider:
             )
 
         except Exception as exc:
-
             set_model_status(
                 OCRModelStatus.ERROR,
                 "Failed to load TrOCR model",
                 str(exc),
             )
 
+            logger.exception(
+                "TrOCR model preparation failed"
+            )
+
             raise
+
 
     def read(
         self,
@@ -227,34 +319,61 @@ class TrOCRProvider:
         """
         Read text from a PIL image using TrOCR.
         """
-
-        processor, model = (
-            self.load_model()
-        )
-
-        pixel_values = processor(
-            images=image,
-            return_tensors="pt",
-        ).pixel_values
-
-        generated_ids = model.generate(
-            pixel_values,
-            max_length=40,
-        )
-
-        decoded_text = (
-            processor.batch_decode(
-                generated_ids,
-                skip_special_tokens=True,
+        if image is None:
+            logger.error(
+                "Cannot run TrOCR because input image is None"
             )
-        )
-
-        if not decoded_text:
             return ""
 
-        return str(
+        try:
+            processor, model = (
+                self.load_model()
+            )
+
+            pixel_values = processor(
+                images=image,
+                return_tensors="pt",
+            ).pixel_values
+
+            generated_ids = model.generate(
+                pixel_values,
+                max_length=40,
+            )
+
+            decoded_text = (
+                processor.batch_decode(
+                    generated_ids,
+                    skip_special_tokens=True,
+                )
+            )
+
+        except Exception:
+            logger.exception(
+                "TrOCR inference failed"
+            )
+            raise
+
+        if not decoded_text:
+            logger.warning(
+                "TrOCR completed but returned no decoded text"
+            )
+            return ""
+
+        result_text = str(
             decoded_text[0]
+        ).strip()
+
+        if not result_text:
+            logger.warning(
+                "TrOCR returned an empty text result"
+            )
+            return ""
+
+        logger.info(
+            "TrOCR inference completed successfully"
         )
+
+        return result_text
 
 
 _TROCR_PROVIDER: Optional[
@@ -266,10 +385,13 @@ def get_trocr_provider() -> TrOCRProvider:
     """
     Return the shared TrOCR provider instance.
     """
-
     global _TROCR_PROVIDER
 
     if _TROCR_PROVIDER is None:
+        logger.info(
+            "Creating shared TrOCR provider instance"
+        )
+
         _TROCR_PROVIDER = (
             TrOCRProvider()
         )

@@ -1,6 +1,12 @@
 import sqlite3
 
+from src.logger import create_logger
 from src.server.database import get_connection
+
+
+logger = create_logger(
+    "server.repositories.camera"
+)
 
 
 def get_active_camera():
@@ -27,9 +33,22 @@ def get_active_camera():
         row = cur.fetchone()
 
         if row is None:
+            logger.info(
+                "No active camera configuration found"
+            )
             return None
 
+        logger.info(
+            "Active camera configuration loaded"
+        )
+
         return dict(row)
+
+    except Exception:
+        logger.exception(
+            "Failed to load camera configuration"
+        )
+        raise
 
     finally:
         conn.close()
@@ -70,6 +89,10 @@ def save_camera_config(data):
                 data["rtsp_path"]
             ))
 
+            logger.info(
+                "Camera configuration updated"
+            )
+
         else:
 
             cur.execute("""
@@ -101,7 +124,20 @@ def save_camera_config(data):
                 data["rtsp_path"]
             ))
 
+            logger.info(
+                "Camera configuration created"
+            )
+
         conn.commit()
+
+    except Exception:
+        conn.rollback()
+
+        logger.exception(
+            "Failed to save camera configuration"
+        )
+
+        raise
 
     finally:
         conn.close()

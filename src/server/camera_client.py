@@ -2,9 +2,15 @@ from dataclasses import dataclass
 from functools import lru_cache
 from urllib.parse import quote
 
+from src.logger import create_logger
 from src.server.api_client import (
     ApiClientError,
-    api_get
+    api_get,
+)
+
+
+logger = create_logger(
+    "server.camera_client"
 )
 
 
@@ -31,7 +37,7 @@ def build_rtsp_url(
     camera_port: int,
     camera_username: str,
     camera_password: str,
-    rtsp_path: str
+    rtsp_path: str,
 ) -> str:
     camera_ip = str(camera_ip).strip()
     camera_username = str(camera_username).strip()
@@ -39,21 +45,25 @@ def build_rtsp_url(
     rtsp_path = str(rtsp_path).strip()
 
     if not camera_ip:
+        logger.error("camera_ip is missing")
         raise CameraConfigError(
             "camera_ip is missing"
         )
 
     if not camera_username:
+        logger.error("camera_username is missing")
         raise CameraConfigError(
             "camera_username is missing"
         )
 
     if not camera_password:
+        logger.error("camera_password is missing")
         raise CameraConfigError(
             "camera_password is missing"
         )
 
     if not rtsp_path:
+        logger.error("rtsp_path is missing")
         raise CameraConfigError(
             "rtsp_path is missing"
         )
@@ -63,12 +73,18 @@ def build_rtsp_url(
 
     username = quote(
         camera_username,
-        safe=""
+        safe="",
     )
 
     password = quote(
         camera_password,
-        safe=""
+        safe="",
+    )
+
+    logger.info(
+        "RTSP URL built for camera %s:%s",
+        camera_ip,
+        camera_port,
     )
 
     return (
@@ -78,27 +94,45 @@ def build_rtsp_url(
 
 
 def fetch_camera_config() -> CameraConfig:
+    logger.info(
+        "Loading camera configuration"
+    )
+
     try:
         result = api_get(
             CAMERA_CONFIG_API_PATH
         )
 
-    except ApiClientError as error:
+    except ApiClientError:
+        logger.exception(
+            "Cannot load camera configuration from API"
+        )
         raise CameraConfigError(
-            f"Cannot load camera configuration: {error}"
-        ) from error
+            "Cannot load camera configuration from API"
+        )
 
     if not result.get("ok"):
+        message = result.get(
+            "message",
+            "Camera configuration request failed",
+        )
+
+        logger.error(
+            "Camera configuration request failed: %s",
+            message,
+        )
+
         raise CameraConfigError(
-            result.get(
-                "message",
-                "Camera configuration request failed"
-            )
+            message
         )
 
     camera = result.get("camera")
 
     if not isinstance(camera, dict):
+        logger.error(
+            "camera object is missing"
+        )
+
         raise CameraConfigError(
             "camera object is missing"
         )
@@ -132,7 +166,11 @@ def fetch_camera_config() -> CameraConfig:
         camera_port=camera_port,
         camera_username=camera_username,
         camera_password=camera_password,
-        rtsp_path=rtsp_path
+        rtsp_path=rtsp_path,
+    )
+
+    logger.info(
+        "Camera configuration loaded successfully"
     )
 
     return CameraConfig(
@@ -142,7 +180,7 @@ def fetch_camera_config() -> CameraConfig:
         camera_username=camera_username,
         camera_password=camera_password,
         rtsp_path=rtsp_path,
-        rtsp_url=rtsp_url
+        rtsp_url=rtsp_url,
     )
 
 
@@ -152,6 +190,10 @@ def get_camera_config() -> CameraConfig:
 
 
 def reload_camera_config() -> CameraConfig:
+    logger.info(
+        "Reloading camera configuration"
+    )
+
     get_camera_config.cache_clear()
 
     return get_camera_config()
