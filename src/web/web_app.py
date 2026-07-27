@@ -1,15 +1,20 @@
+import os
 import time
+from datetime import timedelta
 
 import cv2
 import requests
 from flask import (
     Flask,
+    g,
     Response,
     jsonify,
     redirect,
     render_template,
     request,
     send_from_directory,
+    session,
+    url_for,
 )
 
 from src.logger import create_logger
@@ -26,12 +31,236 @@ from src.server.config import (
 )
 
 
+from src.web.web_auth import (
+    authenticate_login,
+    create_login_session,
+    get_csrf_token,
+    get_current_user,
+    get_missing_login_environment,
+    get_session_secret,
+    is_safe_next_path,
+    login_required,
+    login_required_json,
+    validate_csrf_token,
+)
+
+
 logger = create_logger(
     "web.app"
 )
 
 
 app = Flask(__name__)
+
+app.config.update(
+    SECRET_KEY=get_session_secret(),
+    PERMANENT_SESSION_LIFETIME=(
+        timedelta(hours=8)
+    ),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=(
+        os.getenv(
+            "WEB_SESSION_COOKIE_SECURE",
+            "false",
+        ).strip().lower()
+        in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    ),
+)
+
+
+missing_login_environment = (
+    get_missing_login_environment()
+)
+
+if missing_login_environment:
+    logger.error(
+        (
+            "Web login environment is incomplete. "
+            "Missing: %s"
+        ),
+        ", ".join(
+            missing_login_environment
+        ),
+    )
+
+
+@app.before_request
+def load_current_user():
+    g.current_user = (
+        get_current_user()
+    )
+
+
+@app.context_processor
+def inject_login_context():
+    return {
+        "csrf_token": get_csrf_token,
+        "current_user": getattr(
+            g,
+            "current_user",
+            None,
+        ),
+    }
+
+
+@app.route(
+    "/login",
+    methods=[
+        "GET",
+        "POST",
+    ],
+)
+def login():
+    if g.current_user is not None:
+        return redirect(
+            url_for(
+                "dashboard"
+            )
+        )
+
+    error_message = ""
+    next_path = request.args.get(
+        "next",
+        "",
+    )
+
+    missing_variables = (
+        get_missing_login_environment()
+    )
+
+    if missing_variables:
+        error_message = (
+            "Login environment is not configured: "
+            + ", ".join(
+                missing_variables
+            )
+        )
+
+    elif request.method == "POST":
+        next_path = request.form.get(
+            "next",
+            "",
+        )
+
+        if not validate_csrf_token(
+            request.form.get(
+                "csrf_token"
+            )
+        ):
+            logger.warning(
+                (
+                    "Login rejected because "
+                    "CSRF token was invalid"
+                )
+            )
+
+            error_message = (
+                "Login page expired. "
+                "Please try again."
+            )
+
+        else:
+            username = request.form.get(
+                "username",
+                "",
+            )
+
+            password = request.form.get(
+                "password",
+                "",
+            )
+
+            if authenticate_login(
+                username,
+                password,
+            ):
+                create_login_session()
+
+                logger.info(
+                    (
+                        "Web login succeeded: "
+                        "username=%s"
+                    ),
+                    username,
+                )
+
+                if is_safe_next_path(
+                    next_path
+                ):
+                    return redirect(
+                        next_path
+                    )
+
+                return redirect(
+                    url_for(
+                        "dashboard"
+                    )
+                )
+
+            logger.warning(
+                (
+                    "Web login failed: "
+                    "username=%s"
+                ),
+                username,
+            )
+
+            error_message = (
+                "Invalid username or password"
+            )
+
+    return render_template(
+        "login.html",
+        error_message=error_message,
+        next_path=next_path,
+    )
+
+
+@app.route(
+    "/logout",
+    methods=["POST"],
+)
+@login_required
+def logout():
+    if not validate_csrf_token(
+        request.form.get(
+            "csrf_token"
+        )
+    ):
+        return (
+            "Invalid request token",
+            400,
+        )
+
+    username = (
+        g.current_user.get(
+            "username"
+        )
+        if g.current_user
+        else ""
+    )
+
+    session.clear()
+
+    logger.info(
+        (
+            "Web logout completed: "
+            "username=%s"
+        ),
+        username,
+    )
+
+    return redirect(
+        url_for(
+            "login"
+        )
+    )
 
 
 def get_api_json(
@@ -60,6 +289,7 @@ def get_api_json(
 
 
 @app.route("/")
+@login_required
 def home():
     return redirect(
         "/dashboard"
@@ -67,6 +297,7 @@ def home():
 
 
 @app.route("/dashboard")
+@login_required
 def dashboard():
     return render_template(
         "dashboard.html"
@@ -74,6 +305,7 @@ def dashboard():
 
 
 @app.route("/settings")
+@login_required
 def settings():
     latest_image = get_latest_file(
         RAW_IMAGES_DIR
@@ -134,6 +366,7 @@ def settings():
 
 
 @app.route("/history")
+@login_required
 def history():
     return render_template(
         "history.html"
@@ -141,6 +374,7 @@ def history():
 
 
 @app.route("/live")
+@login_required
 def live():
     return render_template(
         "live.html"
@@ -150,6 +384,7 @@ def live():
 @app.route(
     "/raw_images/<path:filename>"
 )
+@login_required
 def raw_images(filename):
     return send_from_directory(
         RAW_IMAGES_DIR,
@@ -160,6 +395,7 @@ def raw_images(filename):
 @app.route(
     "/calibrated_images/<path:filename>"
 )
+@login_required
 def calibrated_images(filename):
     return send_from_directory(
         CALIBRATED_IMAGES_DIR,
@@ -168,6 +404,7 @@ def calibrated_images(filename):
 
 
 @app.route("/video_feed")
+@login_required
 def video_feed():
     return Response(
         generate_camera_frames(),
@@ -251,6 +488,7 @@ def generate_camera_frames():
     "/web_api/<path:api_path>",
     methods=["GET", "POST"],
 )
+@login_required_json
 def web_api_proxy(api_path):
     logger.info(
         "Proxy request: %s %s",

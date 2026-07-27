@@ -17,6 +17,19 @@
         {% elif request.path == '/settings' %}
             <h1>OCR Settings</h1>
             <p>Calibration &amp; Manual ROI Setup</p>
+
+        {% elif request.path == '/logs' %}
+            <h1>System Logs</h1>
+            <p>Application Log Viewer</p>
+        {% endif %}
+
+        {% if current_user %}
+            <div class="topbar-user">
+                Signed in as
+                <strong>
+                    {{ current_user.username }}
+                </strong>
+            </div>
         {% endif %}
 
     </div>
@@ -50,6 +63,25 @@
         >
             Settings
         </a>
+
+        <form
+            method="post"
+            action="{{ url_for('logout') }}"
+            class="logout-form"
+        >
+            <input
+                type="hidden"
+                name="csrf_token"
+                value="{{ csrf_token() }}"
+            >
+
+            <button
+                type="submit"
+                class="nav-link nav-button"
+            >
+                Logout
+            </button>
+        </form>
 
     </nav>
 

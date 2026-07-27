@@ -11,3 +11,4 @@ requests
 tiktoken
 protobuf
 tokenizers
+python-dotenv
