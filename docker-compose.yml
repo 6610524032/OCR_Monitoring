@@ -3,7 +3,7 @@ services:
     build: .
     container_name: ocr_api
     # command: python -m src.server.api_app
-    command: gunicorn src.server.api_app:app --reload --bind 0.0.0.0:5001
+    command: gunicorn src.server.api_app:app --reload --reload-extra-file /app/src --bind 0.0.0.0:5001
     # command: "tail -f /dev/null"
     # ports:
     #   - "5011:5001"
@@ -34,8 +34,9 @@ services:
   worker:
     build: .
     container_name: ocr_worker
-    command: pymon --exec "python -m src.processing.main_worker" --watch ./src
-    # command: "tail -f /dev/null"
+    #command: pymon --exec "python -m src.processing.main_worker" --watch ./src
+    command: watchmedo auto-restart --directory=/app/src --patterns="*.py" --recursive -- python -m src.processing.main_worker
+    #command: "tail -f /dev/null"
     depends_on:
       api:
         condition: service_healthy
@@ -57,7 +58,7 @@ services:
     build: .
     container_name: ocr_web
     # command: python -m src.web.web_app
-    command: gunicorn src.web.web_app:app --reload --bind 0.0.0.0:5000
+    command: gunicorn src.web.web_app:app --reload --reload-extra-file /app/src --bind 0.0.0.0:5000
     # command: "tail -f /dev/null"
     # ports:
     #   - "5010:5000"
@@ -86,8 +87,15 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       - DNS_SERVER=on
+
+      # needed to resolve vulcan.mtec.or.th
+      - DNS_REBINDING_PROTECTION=on
+      - DNS_REBINDING_PROTECTION_EXEMPT_HOSTNAMES=vulcan.mtec.or.th
+      #- BLOCK_MALICIOUS=off
+      #- DNS_FILTERING=off
       - DNS_UPSTREAM_RESOLVER_TYPE=plain
-      - DNS_UPSTREAM_PLAIN_ADDRESSES=1.1.1.1:53,8.8.8.8:53
+      - DNS_UPSTREAM_PLAIN_ADDRESSES=10.226.211.14:53,10.226.211.15:53
+      #- DNS_UPSTREAM_PLAIN_ADDRESSES=1.1.1.1:53,8.8.8.8:53
 
       - TZ=Asia/Bangkok
       - LOG_LEVEL=debug
@@ -127,11 +135,15 @@ services:
     image: filebrowser/filebrowser:latest
     container_name: filebrowser
     restart: unless-stopped
+    user: "0:0"
+    privileged: true
     ports:
       - "127.0.0.1:8121:80"
     volumes:
       # Directory you want to browse
-      - ./data:/srv
+      - ./src:/srv/src
+      - ./data:/srv/data
+      - ./logs:/srv/logs
       # Database
       - ./filebrowser.db:/database/filebrowser.db
       # Configuration

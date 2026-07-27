@@ -12,3 +12,5 @@ tiktoken
 protobuf
 tokenizers
 python-dotenv
+gunicorn
+watchdog
