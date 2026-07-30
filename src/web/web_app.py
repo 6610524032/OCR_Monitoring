@@ -1,6 +1,10 @@
+import copy
+import json
 import os
+import re
 import time
 from datetime import timedelta
+from pathlib import Path
 from threading import Lock
 from time import monotonic
 
@@ -16,9 +20,9 @@ from flask import (
     render_template,
     request,
     send_from_directory,
-    session,
     url_for,
 )
+from werkzeug.exceptions import BadRequest
 
 from src.logger import create_logger
 from src.processing.calibration import get_latest_file
@@ -35,6 +39,7 @@ from src.server.config import (
 )
 from src.web.web_auth import (
     authenticate_login,
+    clear_login_session,
     create_login_session,
     get_csrf_token,
     get_current_user,
@@ -62,11 +67,35 @@ LONG_API_TIMEOUT = (
     60,
 )
 
+MAX_PROXY_REQUEST_BYTES = (
+    2 * 1024 * 1024
+)
+
+MAX_PROXY_RESPONSE_BYTES = (
+    8 * 1024 * 1024
+)
+
+MAX_API_PATH_LENGTH = 512
+
+PROXY_READ_CHUNK_SIZE = (
+    64 * 1024
+)
+
 LIVE_RETRY_SECONDS = 5
+LIVE_READ_RETRY_SECONDS = 0.2
+LIVE_READ_FAILURE_LIMIT = 3
 LIVE_WARNING_INTERVAL_SECONDS = 60
+
+LIVE_OPEN_TIMEOUT_MSEC = 5000
+LIVE_READ_TIMEOUT_MSEC = 5000
 
 LIVE_PLACEHOLDER_WIDTH = 960
 LIVE_PLACEHOLDER_HEIGHT = 540
+
+
+_SAFE_API_SEGMENT = re.compile(
+    r"^[A-Za-z0-9_-]+$"
+)
 
 
 _live_warning_lock = Lock()
@@ -74,6 +103,78 @@ _live_warning_times: dict[
     str,
     float,
 ] = {}
+
+_settings_cache_lock = Lock()
+_settings_cache = None
+
+
+class ProxyResponseTooLargeError(
+    RuntimeError
+):
+    """Raised when an API response exceeds the limit."""
+
+
+def _environment_bool(
+    name: str,
+    default: bool = False,
+) -> bool:
+    raw_value = os.getenv(
+        name
+    )
+
+    if raw_value is None:
+        return default
+
+    normalized = (
+        raw_value
+        .strip()
+        .casefold()
+    )
+
+    if normalized in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+
+    if normalized in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        return False
+
+    return default
+
+
+def _environment_port(
+    name: str,
+    default: int,
+) -> int:
+    try:
+        value = int(
+            os.getenv(
+                name,
+                str(
+                    default
+                ),
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        return default
+
+    if not 1 <= value <= 65535:
+        return default
+
+    return value
 
 
 app = Flask(__name__)
@@ -88,18 +189,14 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=(
-        os.getenv(
+        _environment_bool(
             "WEB_SESSION_COOKIE_SECURE",
-            "false",
+            default=False,
         )
-        .strip()
-        .lower()
-        in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+    ),
+    SESSION_REFRESH_EACH_REQUEST=False,
+    MAX_CONTENT_LENGTH=(
+        MAX_PROXY_REQUEST_BYTES
     ),
 )
 
@@ -127,6 +224,59 @@ def load_current_user():
     )
 
 
+@app.after_request
+def add_security_headers(
+    response,
+):
+    response.headers.setdefault(
+        "X-Content-Type-Options",
+        "nosniff",
+    )
+
+    response.headers.setdefault(
+        "X-Frame-Options",
+        "SAMEORIGIN",
+    )
+
+    response.headers.setdefault(
+        "Referrer-Policy",
+        "same-origin",
+    )
+
+    response.headers.setdefault(
+        "Cross-Origin-Resource-Policy",
+        "same-origin",
+    )
+
+    if request.endpoint != "static":
+        response.headers.setdefault(
+            "Cache-Control",
+            "no-store",
+        )
+
+    return response
+
+
+@app.errorhandler(413)
+def request_too_large(
+    _error,
+):
+    if request.path.startswith(
+        "/web_api/"
+    ):
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Request body is too large"
+            ),
+        }), 413
+
+    return (
+        "Request body is too large",
+        413,
+    )
+
+
 @app.context_processor
 def inject_login_context():
     return {
@@ -141,6 +291,32 @@ def inject_login_context():
     }
 
 
+def _client_address() -> str:
+    value = request.remote_addr
+
+    if not value:
+        return "unknown"
+
+    return str(
+        value
+    )[:100]
+
+
+def _redirect_no_store(
+    location,
+):
+    response = redirect(
+        location,
+        code=303,
+    )
+
+    response.headers[
+        "Cache-Control"
+    ] = "no-store"
+
+    return response
+
+
 @app.route(
     "/login",
     methods=[
@@ -150,7 +326,7 @@ def inject_login_context():
 )
 def login():
     if g.current_user is not None:
-        return redirect(
+        return _redirect_no_store(
             url_for(
                 "dashboard"
             )
@@ -190,8 +366,10 @@ def login():
             logger.warning(
                 (
                     "Login rejected because "
-                    "CSRF token was invalid"
-                )
+                    "the CSRF token was invalid: "
+                    "client=%s"
+                ),
+                _client_address(),
             )
 
             error_message = (
@@ -214,45 +392,67 @@ def login():
                 username,
                 password,
             ):
-                create_login_session()
+                try:
+                    create_login_session()
 
-                logger.info(
-                    (
-                        "Web login succeeded: "
-                        "username=%s"
-                    ),
-                    username,
-                )
+                except RuntimeError:
+                    logger.exception(
+                        (
+                            "Cannot create Web "
+                            "login session"
+                        )
+                    )
 
-                if is_safe_next_path(
-                    next_path
-                ):
-                    return redirect(
+                    error_message = (
+                        "Login is temporarily "
+                        "unavailable"
+                    )
+
+                else:
+                    logger.info(
+                        (
+                            "Web login succeeded: "
+                            "client=%s"
+                        ),
+                        _client_address(),
+                    )
+
+                    if is_safe_next_path(
                         next_path
+                    ):
+                        return _redirect_no_store(
+                            next_path
+                        )
+
+                    return _redirect_no_store(
+                        url_for(
+                            "dashboard"
+                        )
                     )
 
-                return redirect(
-                    url_for(
-                        "dashboard"
-                    )
+            else:
+                logger.warning(
+                    (
+                        "Web login failed: "
+                        "client=%s"
+                    ),
+                    _client_address(),
                 )
 
-            logger.warning(
-                (
-                    "Web login failed: "
-                    "username=%s"
-                ),
-                username,
-            )
-
-            error_message = (
-                "Invalid username or password"
-            )
+                error_message = (
+                    "Invalid username or password"
+                )
 
     return render_template(
         "login.html",
         error_message=error_message,
-        next_path=next_path,
+        next_path=(
+            next_path
+            if is_safe_next_path(
+                next_path
+            )
+            else ""
+        ),
     )
 
 
@@ -267,6 +467,15 @@ def logout():
             "csrf_token"
         )
     ):
+        logger.warning(
+            (
+                "Logout rejected because "
+                "the CSRF token was invalid: "
+                "client=%s"
+            ),
+            _client_address(),
+        )
+
         return (
             "Invalid request token",
             400,
@@ -280,30 +489,190 @@ def logout():
         else ""
     )
 
-    session.clear()
+    clear_login_session()
 
     logger.info(
         (
             "Web logout completed: "
-            "username=%s"
+            "username=%s, client=%s"
         ),
         username,
+        _client_address(),
     )
 
-    return redirect(
+    return _redirect_no_store(
         url_for(
             "login"
         )
     )
 
 
+def _is_safe_api_path(
+    api_path,
+) -> bool:
+    if not isinstance(
+        api_path,
+        str,
+    ):
+        return False
+
+    if (
+        not api_path
+        or len(
+            api_path
+        ) > MAX_API_PATH_LENGTH
+        or "\\" in api_path
+        or "\x00" in api_path
+        or "?" in api_path
+        or "#" in api_path
+    ):
+        return False
+
+    segments = api_path.split(
+        "/"
+    )
+
+    if (
+        len(
+            segments
+        ) < 2
+        or segments[0] != "api"
+    ):
+        return False
+
+    return all(
+        bool(
+            segment
+        )
+        and segment not in {
+            ".",
+            "..",
+        }
+        and _SAFE_API_SEGMENT.fullmatch(
+            segment
+        )
+        is not None
+        for segment in segments
+    )
+
+
+def _api_target_url(
+    api_path,
+) -> str:
+    if not _is_safe_api_path(
+        api_path
+    ):
+        raise ValueError(
+            "Invalid API path"
+        )
+
+    return (
+        f"{API_SERVER_URL.rstrip('/')}/"
+        f"{api_path}"
+    )
+
+
+def _validate_response_size(
+    response,
+) -> None:
+    raw_content_length = (
+        response.headers.get(
+            "Content-Length"
+        )
+    )
+
+    if not raw_content_length:
+        return
+
+    try:
+        content_length = int(
+            raw_content_length
+        )
+
+    except (
+        TypeError,
+        ValueError,
+        OverflowError,
+    ):
+        return
+
+    if content_length > MAX_PROXY_RESPONSE_BYTES:
+        raise ProxyResponseTooLargeError(
+            (
+                "API response exceeds "
+                "the allowed size"
+            )
+        )
+
+
+def _read_limited_response(
+    response,
+) -> bytes:
+    _validate_response_size(
+        response
+    )
+
+    chunks = []
+    total_size = 0
+
+    for chunk in response.iter_content(
+        chunk_size=(
+            PROXY_READ_CHUNK_SIZE
+        )
+    ):
+        if not chunk:
+            continue
+
+        total_size += len(
+            chunk
+        )
+
+        if total_size > MAX_PROXY_RESPONSE_BYTES:
+            raise ProxyResponseTooLargeError(
+                (
+                    "API response exceeds "
+                    "the allowed size"
+                )
+            )
+
+        chunks.append(
+            chunk
+        )
+
+    return b"".join(
+        chunks
+    )
+
+
+def _response_content_type(
+    response,
+) -> str:
+    content_type = response.headers.get(
+        "Content-Type",
+        "application/json",
+    )
+
+    if (
+        not isinstance(
+            content_type,
+            str,
+        )
+        or "\r" in content_type
+        or "\n" in content_type
+    ):
+        return "application/octet-stream"
+
+    return content_type[:200]
+
+
 def get_api_json(
     api_path,
     params=None,
 ):
-    target_url = (
-        f"{API_SERVER_URL.rstrip('/')}/"
-        f"{api_path.lstrip('/')}"
+    target_url = _api_target_url(
+        api_path.lstrip(
+            "/"
+        )
     )
 
     response = None
@@ -315,16 +684,30 @@ def get_api_json(
                 "Authorization": (
                     f"Bearer {API_KEY}"
                 ),
+                "Accept": (
+                    "application/json"
+                ),
             },
             params=params,
             timeout=(
                 DEFAULT_API_TIMEOUT
             ),
+            stream=True,
         )
 
         response.raise_for_status()
 
-        result = response.json()
+        response_content = (
+            _read_limited_response(
+                response
+            )
+        )
+
+        result = json.loads(
+            response_content.decode(
+                "utf-8"
+            )
+        )
 
         if not isinstance(
             result,
@@ -344,11 +727,149 @@ def get_api_json(
             response.close()
 
 
+def _latest_file_or_none(
+    directory: Path,
+):
+    try:
+        return get_latest_file(
+            directory
+        )
+
+    except OSError as error:
+        logger.warning(
+            (
+                "Cannot inspect latest image "
+                "in %s: %s"
+            ),
+            directory,
+            error,
+        )
+
+        return None
+
+    except Exception:
+        logger.exception(
+            (
+                "Unexpected error while "
+                "loading latest image from %s"
+            ),
+            directory,
+        )
+
+        return None
+
+
+def _validate_settings_bootstrap(
+    settings_data,
+):
+    if not isinstance(
+        settings_data,
+        dict,
+    ):
+        raise ValueError(
+            (
+                "Settings response must "
+                "be a JSON object"
+            )
+        )
+
+    if settings_data.get(
+        "ok"
+    ) is False:
+        raise ValueError(
+            str(
+                settings_data.get(
+                    "message"
+                )
+                or "Settings API failed"
+            )
+        )
+
+    calibration = settings_data.get(
+        "calibration"
+    )
+
+    if (
+        calibration is not None
+        and not isinstance(
+            calibration,
+            dict,
+        )
+    ):
+        raise ValueError(
+            (
+                "calibration must be "
+                "an object or null"
+            )
+        )
+
+    user_tags = settings_data.get(
+        "user_tags",
+        [],
+    )
+
+    if not isinstance(
+        user_tags,
+        list,
+    ):
+        raise ValueError(
+            "user_tags must be a list"
+        )
+
+    return (
+        calibration,
+        user_tags,
+    )
+
+
+def _save_settings_cache(
+    calibration,
+    user_tags,
+) -> None:
+    global _settings_cache
+
+    with _settings_cache_lock:
+        _settings_cache = (
+            copy.deepcopy(
+                calibration
+            ),
+            copy.deepcopy(
+                user_tags
+            ),
+        )
+
+
+def _load_settings_cache():
+    with _settings_cache_lock:
+        if _settings_cache is None:
+            return (
+                None,
+                [],
+                False,
+            )
+
+        calibration, user_tags = (
+            _settings_cache
+        )
+
+        return (
+            copy.deepcopy(
+                calibration
+            ),
+            copy.deepcopy(
+                user_tags
+            ),
+            True,
+        )
+
+
 @app.route("/")
 @login_required
 def home():
     return redirect(
-        "/dashboard"
+        url_for(
+            "dashboard"
+        )
     )
 
 
@@ -364,39 +885,29 @@ def dashboard():
 @login_required
 def settings():
     latest_image = (
-        get_latest_file(
+        _latest_file_or_none(
             RAW_IMAGES_DIR
         )
     )
+
+    using_cached_settings = False
 
     try:
         settings_data = get_api_json(
             "/api/settings/bootstrap"
         )
 
-        calibration = (
-            settings_data.get(
-                "calibration"
-            )
-        )
-
-        user_tags = (
-            settings_data.get(
-                "user_tags",
-                [],
-            )
-        )
-
-        if not isinstance(
+        (
+            calibration,
             user_tags,
-            list,
-        ):
-            raise ValueError(
-                (
-                    "user_tags must "
-                    "be a list"
-                )
-            )
+        ) = _validate_settings_bootstrap(
+            settings_data
+        )
+
+        _save_settings_cache(
+            calibration,
+            user_tags,
+        )
 
         logger.debug(
             (
@@ -405,48 +916,72 @@ def settings():
             )
         )
 
-    except requests.Timeout as error:
+    except requests.Timeout:
         logger.warning(
-            "Settings API timeout: %s",
-            error,
+            "Settings API timed out"
         )
 
-        calibration = None
-        user_tags = []
+        (
+            calibration,
+            user_tags,
+            using_cached_settings,
+        ) = _load_settings_cache()
 
     except requests.RequestException as error:
         logger.warning(
             (
-                "Cannot load settings "
-                "API: %s"
+                "Cannot load Settings API: "
+                "%s"
             ),
             error,
         )
 
-        calibration = None
-        user_tags = []
+        (
+            calibration,
+            user_tags,
+            using_cached_settings,
+        ) = _load_settings_cache()
 
     except (
         TypeError,
         ValueError,
+        UnicodeError,
+        ProxyResponseTooLargeError,
     ) as error:
         logger.warning(
             (
-                "Invalid settings API "
+                "Invalid Settings API "
                 "response: %s"
             ),
             error,
         )
 
-        calibration = None
-        user_tags = []
+        (
+            calibration,
+            user_tags,
+            using_cached_settings,
+        ) = _load_settings_cache()
+
+    except Exception:
+        logger.exception(
+            (
+                "Unexpected error while "
+                "loading Settings data"
+            )
+        )
+
+        (
+            calibration,
+            user_tags,
+            using_cached_settings,
+        ) = _load_settings_cache()
 
     if calibration is None:
         latest_calibrated_image = None
 
     else:
         latest_calibrated_image = (
-            get_latest_file(
+            _latest_file_or_none(
                 CALIBRATED_IMAGES_DIR
             )
         )
@@ -458,6 +993,9 @@ def settings():
             latest_calibrated_image
         ),
         roi_list=user_tags,
+        using_cached_settings=(
+            using_cached_settings
+        ),
     )
 
 
@@ -495,6 +1033,8 @@ def raw_images(
     return send_from_directory(
         RAW_IMAGES_DIR,
         filename,
+        conditional=True,
+        max_age=0,
     )
 
 
@@ -508,6 +1048,8 @@ def calibrated_images(
     return send_from_directory(
         CALIBRATED_IMAGES_DIR,
         filename,
+        conditional=True,
+        max_age=0,
     )
 
 
@@ -526,6 +1068,7 @@ def video_feed():
                 "must-revalidate, max-age=0"
             ),
             "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
         },
     )
 
@@ -583,6 +1126,118 @@ def _release_capture(
                 "camera capture"
             )
         )
+
+
+def _capture_is_opened(
+    cap,
+) -> bool:
+    if cap is None:
+        return False
+
+    try:
+        return bool(
+            cap.isOpened()
+        )
+
+    except Exception:
+        return False
+
+
+def _create_live_capture(
+    rtsp_url,
+):
+    parameters = []
+
+    if hasattr(
+        cv2,
+        "CAP_PROP_OPEN_TIMEOUT_MSEC",
+    ):
+        parameters.extend([
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
+            LIVE_OPEN_TIMEOUT_MSEC,
+        ])
+
+    if hasattr(
+        cv2,
+        "CAP_PROP_READ_TIMEOUT_MSEC",
+    ):
+        parameters.extend([
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC,
+            LIVE_READ_TIMEOUT_MSEC,
+        ])
+
+    cap = None
+
+    if parameters:
+        try:
+            cap = cv2.VideoCapture(
+                rtsp_url,
+                cv2.CAP_FFMPEG,
+                parameters,
+            )
+
+        except (
+            TypeError,
+            cv2.error,
+        ):
+            cap = None
+
+    if cap is None:
+        cap = cv2.VideoCapture(
+            rtsp_url,
+            cv2.CAP_FFMPEG,
+        )
+
+        try:
+            if hasattr(
+                cv2,
+                "CAP_PROP_OPEN_TIMEOUT_MSEC",
+            ):
+                cap.set(
+                    cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
+                    LIVE_OPEN_TIMEOUT_MSEC,
+                )
+
+            if hasattr(
+                cv2,
+                "CAP_PROP_READ_TIMEOUT_MSEC",
+            ):
+                cap.set(
+                    cv2.CAP_PROP_READ_TIMEOUT_MSEC,
+                    LIVE_READ_TIMEOUT_MSEC,
+                )
+
+        except Exception:
+            pass
+
+    try:
+        cap.set(
+            cv2.CAP_PROP_BUFFERSIZE,
+            1,
+        )
+
+    except Exception:
+        pass
+
+    return cap
+
+
+def _valid_frame(
+    frame,
+) -> bool:
+    return (
+        isinstance(
+            frame,
+            np.ndarray,
+        )
+        and frame.size > 0
+        and frame.ndim in {
+            2,
+            3,
+        }
+        and frame.shape[0] > 0
+        and frame.shape[1] > 0
+    )
 
 
 def _create_placeholder_frame(
@@ -663,7 +1318,9 @@ def _create_placeholder_frame(
 def _encode_frame(
     frame,
 ) -> bytes | None:
-    if frame is None:
+    if not _valid_frame(
+        frame
+    ):
         return None
 
     try:
@@ -733,6 +1390,7 @@ def _placeholder_chunk(
 
 def generate_camera_frames():
     cap = None
+    read_failures = 0
     current_state = None
 
     try:
@@ -743,9 +1401,7 @@ def generate_camera_frames():
                         reload_camera_config()
                     )
 
-                except (
-                    CameraNotConfiguredError
-                ):
+                except CameraNotConfiguredError:
                     if (
                         current_state
                         != "not_configured"
@@ -762,12 +1418,10 @@ def generate_camera_frames():
                             "not_configured"
                         )
 
-                    chunk = (
-                        _placeholder_chunk(
-                            (
-                                "Camera is not "
-                                "configured."
-                            )
+                    chunk = _placeholder_chunk(
+                        (
+                            "Camera is not "
+                            "configured."
                         )
                     )
 
@@ -795,12 +1449,10 @@ def generate_camera_frames():
                         "config_unavailable"
                     )
 
-                    chunk = (
-                        _placeholder_chunk(
-                            (
-                                "Camera configuration "
-                                "is unavailable."
-                            )
+                    chunk = _placeholder_chunk(
+                        (
+                            "Camera configuration "
+                            "is unavailable."
                         )
                     )
 
@@ -814,9 +1466,8 @@ def generate_camera_frames():
                     continue
 
                 try:
-                    cap = cv2.VideoCapture(
-                        camera.rtsp_url,
-                        cv2.CAP_FFMPEG,
+                    cap = _create_live_capture(
+                        camera.rtsp_url
                     )
 
                 except Exception as error:
@@ -831,16 +1482,15 @@ def generate_camera_frames():
                         error,
                     )
 
-                if (
-                    cap is None
-                    or not cap.isOpened()
+                if not _capture_is_opened(
+                    cap
                 ):
                     _release_capture(
                         cap
                     )
 
                     cap = None
-
+                    read_failures = 0
                     current_state = (
                         "connection_failed"
                     )
@@ -853,12 +1503,10 @@ def generate_camera_frames():
                         ),
                     )
 
-                    chunk = (
-                        _placeholder_chunk(
-                            (
-                                "Cannot connect "
-                                "to camera."
-                            )
+                    chunk = _placeholder_chunk(
+                        (
+                            "Cannot connect "
+                            "to camera."
                         )
                     )
 
@@ -876,17 +1524,17 @@ def generate_camera_frames():
                         "Live camera stream "
                         "connected: camera=%s"
                     ),
-                    camera.camera_name,
+                    (
+                        camera.camera_name
+                        or "configured camera"
+                    ),
                 )
 
-                current_state = (
-                    "connected"
-                )
+                current_state = "connected"
+                read_failures = 0
 
             try:
-                success, frame = (
-                    cap.read()
-                )
+                success, frame = cap.read()
 
             except Exception as error:
                 success = False
@@ -903,8 +1551,22 @@ def generate_camera_frames():
 
             if (
                 not success
-                or frame is None
+                or not _valid_frame(
+                    frame
+                )
             ):
+                read_failures += 1
+
+                if (
+                    read_failures
+                    < LIVE_READ_FAILURE_LIMIT
+                ):
+                    time.sleep(
+                        LIVE_READ_RETRY_SECONDS
+                    )
+
+                    continue
+
                 _log_live_warning(
                     "camera_stopped",
                     (
@@ -918,17 +1580,15 @@ def generate_camera_frames():
                 )
 
                 cap = None
-
+                read_failures = 0
                 current_state = (
                     "camera_stopped"
                 )
 
-                chunk = (
-                    _placeholder_chunk(
-                        (
-                            "Camera connection "
-                            "was interrupted."
-                        )
+                chunk = _placeholder_chunk(
+                    (
+                        "Camera connection "
+                        "was interrupted."
                     )
                 )
 
@@ -941,17 +1601,17 @@ def generate_camera_frames():
 
                 continue
 
-            chunk = (
-                _build_mjpeg_chunk(
-                    frame
-                )
+            read_failures = 0
+
+            chunk = _build_mjpeg_chunk(
+                frame
             )
 
             if chunk is not None:
                 yield chunk
 
     except GeneratorExit:
-        logger.info(
+        logger.debug(
             (
                 "Live camera viewer "
                 "disconnected"
@@ -962,7 +1622,7 @@ def generate_camera_frames():
         BrokenPipeError,
         ConnectionResetError,
     ):
-        logger.info(
+        logger.debug(
             (
                 "Live camera viewer "
                 "connection closed"
@@ -983,6 +1643,45 @@ def generate_camera_frames():
         )
 
 
+def _read_proxy_json_payload():
+    if not request.data:
+        return {}
+
+    if not request.is_json:
+        raise ValueError(
+            (
+                "Request body must use "
+                "application/json"
+            )
+        )
+
+    try:
+        payload = request.get_json(
+            silent=False
+        )
+
+    except BadRequest as error:
+        raise ValueError(
+            "Request body contains invalid JSON"
+        ) from error
+
+    if payload is None:
+        return {}
+
+    if not isinstance(
+        payload,
+        dict,
+    ):
+        raise ValueError(
+            (
+                "Request JSON must be "
+                "an object"
+            )
+        )
+
+    return payload
+
+
 @app.route(
     "/web_api/<path:api_path>",
     methods=[
@@ -999,22 +1698,15 @@ def web_api_proxy(
         == "api/system/logs"
     )
 
-    if not is_log_viewer_request:
-        logger.info(
-            "Proxy request: %s %s",
-            request.method,
-            api_path,
-        )
-
-    if not api_path.startswith(
-        "api/"
+    if not _is_safe_api_path(
+        api_path
     ):
         logger.warning(
             (
-                "Invalid web proxy "
-                "API path: %s"
+                "Invalid Web proxy API "
+                "path: %s"
             ),
-            api_path,
+            api_path[:MAX_API_PATH_LENGTH],
         )
 
         return jsonify({
@@ -1024,15 +1716,15 @@ def web_api_proxy(
             ),
         }), 400
 
-    target_url = (
-        f"{API_SERVER_URL.rstrip('/')}/"
-        f"{api_path}"
+    target_url = _api_target_url(
+        api_path
     )
 
     authorization_headers = {
         "Authorization": (
             f"Bearer {API_KEY}"
         ),
+        "Accept": "application/json",
     }
 
     proxy_timeout = (
@@ -1058,9 +1750,23 @@ def web_api_proxy(
                 ),
                 params=request.args,
                 timeout=proxy_timeout,
+                stream=True,
             )
 
         else:
+            try:
+                payload = (
+                    _read_proxy_json_payload()
+                )
+
+            except ValueError as error:
+                return jsonify({
+                    "ok": False,
+                    "message": str(
+                        error
+                    ),
+                }), 400
+
             response = requests.post(
                 target_url,
                 headers={
@@ -1069,13 +1775,9 @@ def web_api_proxy(
                         "application/json"
                     ),
                 },
-                json=(
-                    request.get_json(
-                        silent=True
-                    )
-                    or {}
-                ),
+                json=payload,
                 timeout=proxy_timeout,
+                stream=True,
             )
 
         status_code = (
@@ -1083,22 +1785,25 @@ def web_api_proxy(
         )
 
         response_content = (
-            response.content
+            _read_limited_response(
+                response
+            )
         )
 
         content_type = (
-            response.headers.get(
-                "Content-Type",
-                "application/json",
+            _response_content_type(
+                response
             )
         )
 
         if not is_log_viewer_request:
-            logger.info(
+            logger.debug(
                 (
-                    "Proxy response %s "
-                    "-> HTTP %s"
+                    "Web proxy response: "
+                    "method=%s, path=%s, "
+                    "status=%s"
                 ),
+                request.method,
                 api_path,
                 status_code,
             )
@@ -1107,9 +1812,8 @@ def web_api_proxy(
             logger.warning(
                 (
                     "API proxy returned "
-                    "server error "
-                    "(method=%s, path=%s, "
-                    "status=%s)"
+                    "server error: method=%s, "
+                    "path=%s, status=%s"
                 ),
                 request.method,
                 api_path,
@@ -1123,14 +1827,37 @@ def web_api_proxy(
                 "Content-Type": (
                     content_type
                 ),
+                "Cache-Control": (
+                    "no-store"
+                ),
+                "X-Content-Type-Options": (
+                    "nosniff"
+                ),
             },
         )
+
+    except ProxyResponseTooLargeError:
+        logger.warning(
+            (
+                "API proxy response was too "
+                "large: method=%s, path=%s"
+            ),
+            request.method,
+            api_path,
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": (
+                "API response is too large"
+            ),
+        }), 502
 
     except requests.Timeout:
         logger.warning(
             (
-                "API proxy timeout "
-                "(method=%s, path=%s)"
+                "API proxy timeout: "
+                "method=%s, path=%s"
             ),
             request.method,
             api_path,
@@ -1146,9 +1873,8 @@ def web_api_proxy(
     except requests.RequestException as error:
         logger.warning(
             (
-                "Cannot connect to API "
-                "server (method=%s, "
-                "path=%s): %s"
+                "Cannot connect to API server: "
+                "method=%s, path=%s, error=%s"
             ),
             request.method,
             api_path,
@@ -1162,6 +1888,23 @@ def web_api_proxy(
             ),
         }), 502
 
+    except Exception:
+        logger.exception(
+            (
+                "Unexpected Web API proxy "
+                "error: method=%s, path=%s"
+            ),
+            request.method,
+            api_path,
+        )
+
+        return jsonify({
+            "ok": False,
+            "message": (
+                "Web API proxy failed"
+            ),
+        }), 500
+
     finally:
         if response is not None:
             response.close()
@@ -1173,8 +1916,16 @@ if __name__ == "__main__":
     )
 
     app.run(
-        host="0.0.0.0",
-        port=5000,
+        host=os.getenv(
+            "WEB_HOST",
+            "0.0.0.0",
+        ).strip()
+        or "0.0.0.0",
+        port=_environment_port(
+            "WEB_PORT",
+            5000,
+        ),
         debug=False,
         use_reloader=False,
+        threaded=True,
     )
