@@ -475,64 +475,14 @@
                     <button
                         id="saveAllBtn"
                         type="button"
+                        disabled
                     >
-                        Save All Tags
+                        Saved
                     </button>
 
                 </div>
 
             </div>
-
-        </div>
-
-    </div>
-
-
-    <!-- =====================================================
-         5. CONFIGURED TAGS
-    ===================================================== -->
-
-    <div class="card">
-
-        <h2>5. Configured Tags</h2>
-
-        <div class="table-wrapper">
-
-            <table>
-
-                <thead>
-                    <tr>
-                        <th>Tag</th>
-                        <th>Unit</th>
-                        <th>ROI</th>
-                    </tr>
-                </thead>
-
-                <tbody>
-
-                    {% for roi in roi_list %}
-
-                    <tr>
-                        <td>
-                            {{ roi.display_name }}
-                        </td>
-
-                        <td>
-                            {{ roi.unit }}
-                        </td>
-
-                        <td>
-                            ({{ roi.x1|int }}, {{ roi.y1|int }})
-                            -
-                            ({{ roi.x2|int }}, {{ roi.y2|int }})
-                        </td>
-                    </tr>
-
-                    {% endfor %}
-
-                </tbody>
-
-            </table>
 
         </div>
 

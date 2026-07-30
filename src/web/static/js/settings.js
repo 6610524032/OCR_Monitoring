@@ -2,12 +2,68 @@
    GLOBAL STATE
 ===================================================== */
 
-const savedRois = window.SAVED_ROIS || [];
+const savedRois =
+    Array.isArray(window.SAVED_ROIS)
+        ? window.SAVED_ROIS
+        : [];
 
 let rawPoints = [];
 let sortedPoints = [];
 
-let manualBoxes = [];
+let manualBoxes =
+    savedRois.map(
+        function (roi) {
+            return {
+                id: roi.id,
+
+                x1: Number(
+                    roi.x1 ??
+                    roi.roi_x1 ??
+                    0
+                ),
+
+                y1: Number(
+                    roi.y1 ??
+                    roi.roi_y1 ??
+                    0
+                ),
+
+                x2: Number(
+                    roi.x2 ??
+                    roi.roi_x2 ??
+                    0
+                ),
+
+                y2: Number(
+                    roi.y2 ??
+                    roi.roi_y2 ??
+                    0
+                ),
+
+                value:
+                    roi.value ??
+                    "Saved",
+
+                tag_name:
+                    roi.tag_name ??
+                    roi.display_name ??
+                    "",
+
+                unit:
+                    roi.unit ??
+                    "",
+
+                sensor_api_key:
+                    roi.sensor_api_key ??
+                    "",
+
+                status: "done"
+            };
+        }
+    );
+
+let tagsDirty = false;
+let tagsSaving = false;
 let drawMode = false;
 let isDrawingBox = false;
 
@@ -1369,61 +1425,6 @@ if (drawRoiBtn) {
 }
 
 
-function drawSavedRois() {
-    if (
-        !roiCtx ||
-        !roiImage ||
-        roiImage.naturalWidth <= 0
-    ) {
-        return;
-    }
-
-    const scaleX =
-        roiImage.clientWidth /
-        roiImage.naturalWidth;
-
-    const scaleY =
-        roiImage.clientHeight /
-        roiImage.naturalHeight;
-
-    savedRois.forEach(function (roi) {
-        if (!roi.id) {
-            return;
-        }
-
-        const x = roi.x1 * scaleX;
-        const y = roi.y1 * scaleY;
-
-        const w =
-            (roi.x2 - roi.x1) *
-            scaleX;
-
-        const h =
-            (roi.y2 - roi.y1) *
-            scaleY;
-
-        roiCtx.strokeStyle = "#22c55e";
-        roiCtx.lineWidth = 2;
-
-        roiCtx.strokeRect(
-            x,
-            y,
-            w,
-            h
-        );
-
-        roiCtx.fillStyle = "#22c55e";
-        roiCtx.font = "14px Arial";
-
-        roiCtx.fillText(
-            roi.display_name || "",
-            x + 4,
-            Math.max(14, y - 6)
-        );
-    });
-}
-
-
 function drawRoiCanvas() {
     if (
         !roiCtx ||
@@ -1440,8 +1441,6 @@ function drawRoiCanvas() {
         roiCanvas.width,
         roiCanvas.height
     );
-
-    drawSavedRois();
 
     const scaleX =
         roiImage.clientWidth /
@@ -1625,6 +1624,8 @@ function finishBox() {
     };
 
     manualBoxes.push(box);
+
+    markTagsDirty();
 
     drawRoiCanvas();
     updateRoiTable();
@@ -1873,34 +1874,43 @@ function bindTableInputs() {
             "#roiTable input[data-box-id]"
         );
 
-    inputs.forEach(function (input) {
-        input.addEventListener(
-            "input",
-            function () {
-                const boxId =
-                    input.dataset.boxId;
+    inputs.forEach(
+        function (input) {
+            input.addEventListener(
+                "input",
+                function () {
+                    const boxId =
+                        input.dataset.boxId;
 
-                const field =
-                    input.dataset.field;
+                    const field =
+                        input.dataset.field;
 
-                const box =
-                    manualBoxes.find(
-                        function (item) {
-                            return (
-                                item.id ===
-                                boxId
-                            );
-                        }
-                    );
+                    const box =
+                        manualBoxes.find(
+                            function (item) {
+                                return (
+                                    String(item.id) ===
+                                    String(boxId)
+                                );
+                            }
+                        );
 
-                if (box) {
+                    if (!box) {
+                        return;
+                    }
+
                     box[field] =
                         input.value;
+
+                    markTagsDirty();
+
+                    drawRoiCanvas();
                 }
-            }
-        );
-    });
+            );
+        }
+    );
 }
+
 
 
 function deleteBox(boxId) {
@@ -1908,10 +1918,13 @@ function deleteBox(boxId) {
         manualBoxes.filter(
             function (box) {
                 return (
-                    box.id !== boxId
+                    String(box.id) !==
+                    String(boxId)
                 );
             }
         );
+
+    markTagsDirty();
 
     drawRoiCanvas();
     updateRoiTable();
@@ -1937,14 +1950,126 @@ const saveAllBtn =
         "saveAllBtn"
     );
 
+
+function updateSaveAllButton() {
+    if (!saveAllBtn) {
+        return;
+    }
+
+    if (tagsSaving) {
+        saveAllBtn.disabled = true;
+        saveAllBtn.innerText =
+            "Saving...";
+
+        return;
+    }
+
+    if (tagsDirty) {
+        saveAllBtn.disabled = false;
+        saveAllBtn.innerText =
+            "Save Changes";
+
+        saveAllBtn.classList.add(
+            "save-dirty"
+        );
+
+        return;
+    }
+
+    saveAllBtn.disabled = true;
+    saveAllBtn.innerText =
+        "Saved";
+
+    saveAllBtn.classList.remove(
+        "save-dirty"
+    );
+}
+
+
+function markTagsDirty() {
+    tagsDirty = true;
+
+    updateSaveAllButton();
+}
+
+
+function markTagsSaved() {
+    tagsDirty = false;
+
+    updateSaveAllButton();
+}
+
+
+function createSavedBox(
+    tag,
+    previousBoxes,
+    index
+) {
+    const tagName =
+        String(
+            tag.tag_name ??
+            tag.display_name ??
+            ""
+        ).trim();
+
+    const matchingBox =
+        previousBoxes.find(
+            function (box) {
+                return (
+                    String(
+                        box.tag_name ?? ""
+                    ).trim() === tagName &&
+                    Number(box.x1) ===
+                        Number(tag.x1) &&
+                    Number(box.y1) ===
+                        Number(tag.y1) &&
+                    Number(box.x2) ===
+                        Number(tag.x2) &&
+                    Number(box.y2) ===
+                        Number(tag.y2)
+                );
+            }
+        ) ||
+        previousBoxes[index] ||
+        null;
+
+    return {
+        id: tag.id,
+
+        x1: Number(tag.x1),
+        y1: Number(tag.y1),
+        x2: Number(tag.x2),
+        y2: Number(tag.y2),
+
+        value:
+            matchingBox?.value ??
+            "Saved",
+
+        tag_name: tagName,
+
+        unit:
+            String(
+                tag.unit ?? ""
+            ),
+
+        sensor_api_key:
+            String(
+                tag.sensor_api_key ?? ""
+            ),
+
+        status: "done"
+    };
+}
+
+
 if (saveAllBtn) {
     saveAllBtn.addEventListener(
         "click",
         async function () {
-            if (manualBoxes.length === 0) {
-                alert(
-                    "กรุณาวาด ROI ก่อน"
-                );
+            if (
+                !tagsDirty ||
+                tagsSaving
+            ) {
                 return;
             }
 
@@ -1952,16 +2077,19 @@ if (saveAllBtn) {
                 manualBoxes.some(
                     function (box) {
                         return (
-                            box.status === "pending" ||
-                             box.status === "waiting"
+                            box.status ===
+                                "pending" ||
+                            box.status ===
+                                "waiting"
                         );
                     }
                 );
 
             if (notReady) {
                 alert(
-                    "OCR Model ยังไม่พร้อม กรุณารอสักครู่แล้วลองอ่านใหม่"
+                    "ยังมี ROI ที่กำลังอ่าน OCR กรุณารอสักครู่"
                 );
+
                 return;
             }
 
@@ -1970,31 +2098,59 @@ if (saveAllBtn) {
             for (
                 const box of manualBoxes
             ) {
-                if (
-                    !box.tag_name.trim()
-                ) {
+                const tagName =
+                    String(
+                        box.tag_name ?? ""
+                    ).trim();
+
+                if (!tagName) {
                     alert(
                         "กรุณาใส่ Tag Name ให้ครบทุกช่อง"
                     );
+
                     return;
                 }
 
-                tagsToSave.push({
-                    tag_name:
-                        box.tag_name.trim(),
+                const payload = {
+                    tag_name: tagName,
 
                     unit:
-                        box.unit.trim(),
+                        String(
+                            box.unit ?? ""
+                        ).trim(),
 
                     sensor_api_key:
-                        box.sensor_api_key.trim(),
+                        String(
+                            box.sensor_api_key ??
+                            ""
+                        ).trim(),
 
                     x1: box.x1,
                     y1: box.y1,
                     x2: box.x2,
                     y2: box.y2
-                });
+                };
+
+                const databaseId =
+                    Number(box.id);
+
+                if (
+                    Number.isInteger(
+                        databaseId
+                    ) &&
+                    databaseId > 0
+                ) {
+                    payload.id =
+                        databaseId;
+                }
+
+                tagsToSave.push(
+                    payload
+                );
             }
+
+            tagsSaving = true;
+            updateSaveAllButton();
 
             try {
                 const response =
@@ -2002,10 +2158,12 @@ if (saveAllBtn) {
                         "/web_api/api/save_user_tags",
                         {
                             method: "POST",
+
                             headers: {
                                 "Content-Type":
                                     "application/json"
                             },
+
                             body: JSON.stringify({
                                 tags: tagsToSave
                             })
@@ -2015,21 +2173,67 @@ if (saveAllBtn) {
                 const result =
                     await response.json();
 
-                if (result.ok) {
-                    alert(
-                        "Save All Tags สำเร็จ"
-                    );
-
-                    location.reload();
-                } else {
-                    alert(
+                if (
+                    !response.ok ||
+                    !result.ok
+                ) {
+                    throw new Error(
                         result.message ||
                         "Save failed"
                     );
                 }
+
+                if (
+                    !Array.isArray(
+                        result.tags
+                    )
+                ) {
+                    throw new Error(
+                        "Saved tags were not returned by the server"
+                    );
+                }
+
+                const previousBoxes =
+                    [...manualBoxes];
+
+                manualBoxes =
+                    result.tags.map(
+                        function (
+                            tag,
+                            index
+                        ) {
+                            return createSavedBox(
+                                tag,
+                                previousBoxes,
+                                index
+                            );
+                        }
+                    );
+
+                markTagsSaved();
+
+                drawRoiCanvas();
+                updateRoiTable();
+
+                alert(
+                    "Save Tags สำเร็จ"
+                );
+
             } catch (error) {
-                console.error(error);
-                alert("Save failed");
+                console.error(
+                    "Save tags error:",
+                    error
+                );
+
+                alert(
+                    error.message ||
+                    "Save failed"
+                );
+
+            } finally {
+                tagsSaving = false;
+
+                updateSaveAllButton();
             }
         }
     );
@@ -2649,6 +2853,9 @@ async function loadCameraConfiguration() {
     }
 
 }
+
+updateRoiTable();
+updateSaveAllButton();
 
 loadCameraConfiguration();
 startOcrStatusMonitoring();

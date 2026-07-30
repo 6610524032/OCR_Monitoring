@@ -1003,3 +1003,20 @@ input{
         height: 36px;
     }
 }
+
+#saveAllBtn {
+    background: #16a34a;
+    color: #ffffff;
+}
+
+#saveAllBtn:hover:not(:disabled) {
+    background: #15803d;
+}
+
+#saveAllBtn:disabled {
+    color: #ffffff;
+    background: #9ca3af;
+
+    cursor: not-allowed;
+    opacity: 1;
+}
