@@ -11,6 +11,7 @@ from src.processing.ocr_engine import (
     read_manual_roi,
 )
 
+
 __all__ = [
     "crop_by_roi",
     "read_crop",
