@@ -899,6 +899,286 @@ def prepare_ocr_model():
         )
 
 
+def start_background_thread(
+    thread_name,
+    target,
+):
+    try:
+        thread = Thread(
+            target=target,
+            name=thread_name,
+            daemon=True,
+        )
+
+        thread.start()
+
+        logger.info(
+            "%s thread started",
+            thread_name,
+        )
+
+        print(
+            f"{thread_name} Started"
+        )
+
+        return thread
+
+    except Exception:
+        logger.exception(
+            "Cannot start %s thread",
+            thread_name,
+        )
+
+        print(
+            f"[THREAD ERROR] "
+            f"Cannot start {thread_name}"
+        )
+
+        return None
+
+
+def process_scheduled_capture_cycle(
+    last_capture_key,
+):
+    try:
+        should_capture, capture_key = (
+            should_capture_rtsp_now(
+                last_capture_key
+            )
+        )
+
+    except Exception:
+        logger.exception(
+            "Failed to check RTSP capture schedule"
+        )
+
+        return last_capture_key
+
+    if not should_capture:
+        return last_capture_key
+
+    # ป้องกันการลองจับภาพซ้ำทุกลูป
+    # ภายในนาทีเดียวกันเมื่อกล้องมีปัญหา
+    last_capture_key = capture_key
+
+    logger.info(
+        (
+            "Starting scheduled RTSP capture: "
+            "capture_key=%s"
+        ),
+        capture_key,
+    )
+
+    print(
+        "[RTSP] Scheduled capture..."
+    )
+
+    try:
+        capture_result = (
+            capture_rtsp_image()
+        )
+
+    except Exception:
+        logger.exception(
+            (
+                "Unexpected scheduled RTSP "
+                "capture error: capture_key=%s"
+            ),
+            capture_key,
+        )
+
+        print(
+            "[RTSP] Unexpected capture error"
+        )
+
+        return last_capture_key
+
+    if not isinstance(
+        capture_result,
+        dict,
+    ):
+        logger.error(
+            (
+                "Scheduled RTSP capture returned "
+                "invalid data: %r"
+            ),
+            capture_result,
+        )
+
+        return last_capture_key
+
+    if not capture_result.get("ok"):
+        logger.error(
+            (
+                "Scheduled RTSP capture failed: "
+                "%s"
+            ),
+            capture_result,
+        )
+
+        print(
+            "[RTSP] Capture failed:",
+            capture_result,
+        )
+
+        return last_capture_key
+
+    required_fields = (
+        "image_path",
+        "captured_at",
+        "capture_timestamp",
+    )
+
+    missing_fields = [
+        field
+        for field in required_fields
+        if field not in capture_result
+    ]
+
+    if missing_fields:
+        logger.error(
+            (
+                "Scheduled capture result is "
+                "missing fields: %s"
+            ),
+            ", ".join(
+                missing_fields
+            ),
+        )
+
+        return last_capture_key
+
+    logger.info(
+        (
+            "Scheduled RTSP capture "
+            "completed successfully"
+        )
+    )
+
+    print(
+        "[RTSP] Capture successful"
+    )
+
+    try:
+        process_new_image(
+            raw_image_path=(
+                capture_result[
+                    "image_path"
+                ]
+            ),
+            captured_at=(
+                capture_result[
+                    "captured_at"
+                ]
+            ),
+            capture_timestamp=(
+                capture_result[
+                    "capture_timestamp"
+                ]
+            ),
+        )
+
+    except Exception:
+        logger.exception(
+            (
+                "Uncaught scheduled image "
+                "processing error: image=%s"
+            ),
+            capture_result.get(
+                "image_path"
+            ),
+        )
+
+    return last_capture_key
+
+
+def process_incoming_image_cycle():
+    try:
+        capture_result = capture_image()
+
+    except Exception:
+        logger.exception(
+            (
+                "Unexpected error while checking "
+                "incoming images"
+            )
+        )
+
+        return
+
+    if not capture_result:
+        return
+
+    if not isinstance(
+        capture_result,
+        dict,
+    ):
+        logger.error(
+            (
+                "Incoming image capture returned "
+                "invalid data: %r"
+            ),
+            capture_result,
+        )
+
+        return
+
+    required_fields = (
+        "image_path",
+        "captured_at",
+        "capture_timestamp",
+    )
+
+    missing_fields = [
+        field
+        for field in required_fields
+        if field not in capture_result
+    ]
+
+    if missing_fields:
+        logger.error(
+            (
+                "Incoming capture result is "
+                "missing fields: %s"
+            ),
+            ", ".join(
+                missing_fields
+            ),
+        )
+
+        return
+
+    try:
+        process_new_image(
+            raw_image_path=(
+                capture_result[
+                    "image_path"
+                ]
+            ),
+            captured_at=(
+                capture_result[
+                    "captured_at"
+                ]
+            ),
+            capture_timestamp=(
+                capture_result[
+                    "capture_timestamp"
+                ]
+            ),
+        )
+
+    except Exception:
+        logger.exception(
+            (
+                "Uncaught incoming image "
+                "processing error: image=%s"
+            ),
+            capture_result.get(
+                "image_path"
+            ),
+        )
+
+
 def main():
     logger.info(
         "OCR Worker started"
@@ -907,136 +1187,86 @@ def main():
     print("OCR Worker Started")
     print("All data access uses API")
     print("RTSP capture uses real clock time")
-    print(f"Waiting for images in {INCOMING_DIR}")
+    print(
+        f"Waiting for images in "
+        f"{INCOMING_DIR}"
+    )
     print("Press Ctrl + C to stop")
 
-    ocr_model_thread = Thread(
-        target=prepare_ocr_model,
-        name="OCRModelLoader",
-        daemon=True,
-    )
-    ocr_model_thread.start()
-
-    logger.info(
-        "OCR Model Loader thread started"
+    ocr_model_thread = (
+        start_background_thread(
+            thread_name="OCRModelLoader",
+            target=prepare_ocr_model,
+        )
     )
 
-    print("OCR Model Loader Started")
+    if ocr_model_thread is None:
+        set_model_status(
+            OCRModelStatus.ERROR,
+            message=(
+                "Cannot start OCR model loader"
+            ),
+            error=(
+                "OCRModelLoader thread "
+                "could not be started"
+            ),
+        )
 
-    sender_thread = Thread(
+    start_background_thread(
+        thread_name=(
+            "VulcanSenderWorker"
+        ),
         target=sender_loop,
-        name="VulcanSenderWorker",
-        daemon=True
     )
-    sender_thread.start()
-
-    logger.info(
-        "Vulcan Sender Worker thread started"
-    )
-
-    print("Vulcan Sender Worker Started")
 
     last_capture_key = None
 
     while True:
         try:
-            should_capture, capture_key = (
-                should_capture_rtsp_now(
+            last_capture_key = (
+                process_scheduled_capture_cycle(
                     last_capture_key
                 )
             )
 
-            if should_capture:
-                print(
-                    "[RTSP] Scheduled capture..."
+        except Exception:
+            # ชั้นป้องกันสุดท้ายของ
+            # Scheduled Capture
+            logger.exception(
+                (
+                    "Uncaught error in scheduled "
+                    "capture cycle"
                 )
-
-                logger.info(
-                    "Starting scheduled RTSP capture"
-                )
-
-                capture_result = (
-                    capture_rtsp_image()
-                )
-
-                if (
-                    capture_result
-                    and capture_result.get("ok")
-                ):
-                    logger.info(
-                        "Scheduled RTSP capture completed successfully"
-                    )
-
-                    print(
-                        "[RTSP] Capture successful"
-                    )
-
-                    process_new_image(
-                        raw_image_path=(
-                            capture_result[
-                                "image_path"
-                            ]
-                        ),
-                        captured_at=(
-                            capture_result[
-                                "captured_at"
-                            ]
-                        ),
-                        capture_timestamp=(
-                            capture_result[
-                                "capture_timestamp"
-                            ]
-                        )
-                    )
-
-                else:
-                    logger.error(
-                        "Scheduled RTSP capture failed: %s",
-                        capture_result
-                    )
-
-                    print(
-                        "[RTSP] Capture failed:",
-                        capture_result
-                    )
-
-                last_capture_key = (
-                    capture_key
-                )
-
-            capture_result = capture_image()
-
-            if capture_result:
-                process_new_image(
-                    raw_image_path=(
-                        capture_result[
-                            "image_path"
-                        ]
-                    ),
-                    captured_at=(
-                        capture_result[
-                            "captured_at"
-                        ]
-                    ),
-                    capture_timestamp=(
-                        capture_result[
-                            "capture_timestamp"
-                        ]
-                    )
-                )
-
-            time.sleep(
-                PROCESS_CHECK_INTERVAL
             )
+
+        try:
+            process_incoming_image_cycle()
 
         except Exception:
+            # ชั้นป้องกันสุดท้ายของ
+            # Incoming Image
             logger.exception(
-                "Unexpected error in OCR worker loop"
+                (
+                    "Uncaught error in incoming "
+                    "image cycle"
+                )
             )
 
+        try:
             time.sleep(
                 PROCESS_CHECK_INTERVAL
             )
+
+        except KeyboardInterrupt:
+            logger.info(
+                "OCR Worker stopped by user"
+            )
+
+            print(
+                "OCR Worker stopped"
+            )
+
+            break
 
 
 if __name__ == "__main__":

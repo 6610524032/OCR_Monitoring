@@ -43,10 +43,12 @@ def api_camera_config():
 
             return jsonify({
                 "ok": False,
+                "configured": False,
+                "camera": None,
                 "message": (
                     "Camera configuration not found"
-                )
-            }), 404
+            )
+        })
 
         logger.info(
             "Camera configuration loaded"
@@ -83,62 +85,140 @@ def api_camera_config():
 )
 @require_api_key
 def api_save_camera_config():
-    data = request.get_json(
-        silent=True
-    ) or {}
-
-    required_fields = [
-        "camera_name",
-        "camera_ip",
-        "camera_port",
-        "camera_username",
-        "camera_password",
-        "rtsp_path"
-    ]
-
-    missing_fields = [
-        field
-        for field in required_fields
-        if str(
-            data.get(field, "")
-        ).strip() == ""
-    ]
-
-    if missing_fields:
-        logger.warning(
-            "Camera configuration is incomplete"
-        )
-
-        return jsonify({
-            "ok": False,
-            "message": (
-                "Missing required fields: "
-                + ", ".join(missing_fields)
-            )
-        }), 400
-
-    camera_data = {
-        "camera_name": str(
-            data["camera_name"]
-        ).strip(),
-        "camera_ip": str(
-            data["camera_ip"]
-        ).strip(),
-        "camera_port": int(
-            data["camera_port"]
-        ),
-        "camera_username": str(
-            data["camera_username"]
-        ).strip(),
-        "camera_password": str(
-            data["camera_password"]
-        ),
-        "rtsp_path": str(
-            data["rtsp_path"]
-        ).strip()
-    }
-
     try:
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        required_fields = [
+            "camera_name",
+            "camera_ip",
+            "camera_port",
+            "camera_username",
+            "camera_password",
+            "rtsp_path"
+        ]
+
+        missing_fields = [
+            field
+            for field in required_fields
+            if str(
+                data.get(field, "")
+            ).strip() == ""
+        ]
+
+        if missing_fields:
+            logger.warning(
+                (
+                    "Camera configuration "
+                    "is incomplete: %s"
+                ),
+                ", ".join(
+                    missing_fields
+                )
+            )
+
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Missing required fields: "
+                    + ", ".join(
+                        missing_fields
+                    )
+                )
+            }), 400
+
+        try:
+            camera_port = int(
+                data.get(
+                    "camera_port"
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+            logger.warning(
+                "Camera port is invalid"
+            )
+
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Camera port must be "
+                    "a valid number."
+                )
+            }), 400
+
+        if not (
+            1 <= camera_port <= 65535
+        ):
+            logger.warning(
+                (
+                    "Camera port is outside "
+                    "the valid range: %s"
+                ),
+                camera_port
+            )
+
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Camera port must be "
+                    "between 1 and 65535."
+                )
+            }), 400
+
+        rtsp_path = str(
+            data.get(
+                "rtsp_path",
+                ""
+            )
+        ).strip()
+
+        if not rtsp_path.startswith("/"):
+            rtsp_path = (
+                "/"
+                + rtsp_path
+            )
+
+        camera_data = {
+            "camera_name": str(
+                data.get(
+                    "camera_name",
+                    ""
+                )
+            ).strip(),
+
+            "camera_ip": str(
+                data.get(
+                    "camera_ip",
+                    ""
+                )
+            ).strip(),
+
+            "camera_port": (
+                camera_port
+            ),
+
+            "camera_username": str(
+                data.get(
+                    "camera_username",
+                    ""
+                )
+            ).strip(),
+
+            "camera_password": str(
+                data.get(
+                    "camera_password",
+                    ""
+                )
+            ),
+
+            "rtsp_path": rtsp_path
+        }
+
         save_camera_config(
             camera_data
         )
@@ -173,24 +253,19 @@ def api_save_camera_config():
 )
 @require_api_key
 def api_test_camera():
-    data = request.get_json(
-        silent=True
-    ) or {}
+    cap = None
 
     try:
+        data = request.get_json(
+            silent=True
+        ) or {}
+
         camera_ip = str(
             data.get(
                 "camera_ip",
                 ""
             )
         ).strip()
-
-        camera_port = int(
-            data.get(
-                "camera_port",
-                554
-            )
-        )
 
         camera_username = str(
             data.get(
@@ -204,7 +279,7 @@ def api_test_camera():
                 "camera_password",
                 ""
             )
-        ).strip()
+        )
 
         rtsp_path = str(
             data.get(
@@ -213,8 +288,58 @@ def api_test_camera():
             )
         ).strip()
 
+        if not camera_ip:
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Camera IP is required."
+                )
+            }), 400
+
+        try:
+            camera_port = int(
+                data.get(
+                    "camera_port",
+                    554
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Camera port must be "
+                    "a valid number."
+                )
+            }), 400
+
+        if not (
+            1 <= camera_port <= 65535
+        ):
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Camera port must be "
+                    "between 1 and 65535."
+                )
+            }), 400
+
+        if not rtsp_path:
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "RTSP path is required."
+                )
+            }), 400
+
         if not rtsp_path.startswith("/"):
-            rtsp_path = "/" + rtsp_path
+            rtsp_path = (
+                "/"
+                + rtsp_path
+            )
 
         username = quote(
             camera_username,
@@ -233,33 +358,45 @@ def api_test_camera():
         )
 
         cap = cv2.VideoCapture(
-            rtsp_url
+            rtsp_url,
+            cv2.CAP_FFMPEG
         )
 
-        ok, _ = cap.read()
-
-        cap.release()
-
-        if ok:
-            logger.info(
-                "Camera connection test succeeded"
+        if not cap.isOpened():
+            logger.warning(
+                "Camera connection could not be opened"
             )
 
             return jsonify({
-                "ok": True,
+                "ok": False,
                 "message": (
-                    "Camera connected successfully."
+                    "Cannot connect to camera."
                 )
             })
 
-        logger.warning(
-            "Camera connection test failed"
+        ok, _ = cap.read()
+
+        if not ok:
+            logger.warning(
+                "Camera opened but no frame was received"
+            )
+
+            return jsonify({
+                "ok": False,
+                "message": (
+                    "Camera connected, but "
+                    "no image was received."
+                )
+            })
+
+        logger.info(
+            "Camera connection test succeeded"
         )
 
         return jsonify({
-            "ok": False,
+            "ok": True,
             "message": (
-                "Cannot connect to camera."
+                "Camera connected successfully."
             )
         })
 
@@ -274,6 +411,10 @@ def api_test_camera():
                 "Camera connection test failed"
             )
         }), 500
+
+    finally:
+        if cap is not None:
+            cap.release()
 
 
 @camera_bp.route(
@@ -296,6 +437,27 @@ def api_capture_image():
                 "ok": False,
                 "message": (
                     "Cannot capture image."
+                )
+            }), 500
+
+        if not isinstance(
+            capture_result,
+            dict
+        ):
+            logger.error(
+                (
+                    "Capture returned invalid "
+                    "result data: %r"
+                ),
+                capture_result
+            )
+
+            return jsonify({
+                "ok": False,
+                "stage": "capture_result",
+                "message": (
+                    "Capture returned an "
+                    "invalid result."
                 )
             }), 500
 

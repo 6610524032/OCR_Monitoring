@@ -1,6 +1,8 @@
+import sqlite3
+
 from src.logger import create_logger
-from src.server.database import get_connection
 from src.server.config import DB_PATH
+from src.server.database import get_connection
 
 
 logger = create_logger(
@@ -8,16 +10,136 @@ logger = create_logger(
 )
 
 
+def _safe_rollback(
+    conn,
+) -> None:
+    """
+    Roll back safely without hiding
+    the original initialization error.
+    """
+    if conn is None:
+        return
+
+    try:
+        conn.rollback()
+
+    except Exception:
+        logger.exception(
+            (
+                "Failed to roll back database "
+                "initialization transaction"
+            )
+        )
+
+
+def _safe_close(
+    conn,
+) -> None:
+    """
+    Close safely without hiding
+    the original initialization error.
+    """
+    if conn is None:
+        return
+
+    try:
+        conn.close()
+
+    except Exception:
+        logger.exception(
+            (
+                "Failed to close database "
+                "initialization connection"
+            )
+        )
+
+
+def _get_table_columns(
+    cursor,
+    table_name: str,
+) -> set[str]:
+    """
+    Return the existing column names
+    for a database table.
+    """
+    cursor.execute(
+        f'PRAGMA table_info("{table_name}")'
+    )
+
+    return {
+        str(row[1])
+        for row in cursor.fetchall()
+    }
+
+
+def _add_column_if_missing(
+    cursor,
+    table_name: str,
+    column_name: str,
+    column_definition: str,
+) -> bool:
+    """
+    Add a column only when it does not
+    already exist.
+
+    Returns True when a column was added.
+    """
+    existing_columns = (
+        _get_table_columns(
+            cursor,
+            table_name,
+        )
+    )
+
+    if column_name in existing_columns:
+        return False
+
+    logger.info(
+        (
+            "Adding database column: "
+            "table=%s, column=%s"
+        ),
+        table_name,
+        column_name,
+    )
+
+    cursor.execute(
+        (
+            f'ALTER TABLE "{table_name}" '
+            f'ADD COLUMN "{column_name}" '
+            f"{column_definition}"
+        )
+    )
+
+    return True
+
+
 def init_database():
+    """
+    Create and migrate the local database schema.
+
+    Initialization is transactional. When any
+    statement fails, all changes in this run
+    are rolled back.
+    """
     logger.info(
         "Initializing database schema"
     )
 
-    conn = get_connection()
-    cur = conn.cursor()
+    conn = None
 
     try:
-        cur.execute("""
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Prevent multiple API processes from
+        # changing the schema at the same time.
+        cursor.execute(
+            "BEGIN IMMEDIATE"
+        )
+
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS calibration (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -40,9 +162,11 @@ def init_database():
                 created_at TEXT,
                 updated_at TEXT
             )
-        """)
+            """
+        )
 
-        cur.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS user_tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -62,25 +186,18 @@ def init_database():
                 created_at TEXT,
                 updated_at TEXT
             )
-        """)
+            """
+        )
 
-        cur.execute("PRAGMA table_info(user_tags)")
-        user_tag_columns = {
-            row[1]
-            for row in cur.fetchall()
-        }
+        _add_column_if_missing(
+            cursor=cursor,
+            table_name="user_tags",
+            column_name="sensor_api_key",
+            column_definition="TEXT",
+        )
 
-        if "sensor_api_key" not in user_tag_columns:
-            logger.info(
-                "Adding column sensor_api_key to user_tags"
-            )
-
-            cur.execute("""
-                ALTER TABLE user_tags
-                ADD COLUMN sensor_api_key TEXT
-            """)
-
-        cur.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS camera (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -98,25 +215,20 @@ def init_database():
                 created_at TEXT,
                 updated_at TEXT
             )
-        """)
+            """
+        )
 
-        cur.execute("PRAGMA table_info(camera)")
-        camera_columns = {
-            row[1]
-            for row in cur.fetchall()
-        }
+        _add_column_if_missing(
+            cursor=cursor,
+            table_name="camera",
+            column_name="camera_port",
+            column_definition=(
+                "INTEGER NOT NULL DEFAULT 554"
+            ),
+        )
 
-        if "camera_port" not in camera_columns:
-            logger.info(
-                "Adding column camera_port to camera"
-            )
-
-            cur.execute("""
-                ALTER TABLE camera
-                ADD COLUMN camera_port INTEGER NOT NULL DEFAULT 554
-            """)
-
-        cur.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS ocr_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -133,25 +245,18 @@ def init_database():
 
                 created_at TEXT
             )
-        """)
+            """
+        )
 
-        cur.execute("PRAGMA table_info(ocr_runs)")
-        ocr_run_columns = {
-            row[1]
-            for row in cur.fetchall()
-        }
+        _add_column_if_missing(
+            cursor=cursor,
+            table_name="ocr_runs",
+            column_name="captured_at",
+            column_definition="TEXT",
+        )
 
-        if "captured_at" not in ocr_run_columns:
-            logger.info(
-                "Adding column captured_at to ocr_runs"
-            )
-
-            cur.execute("""
-                ALTER TABLE ocr_runs
-                ADD COLUMN captured_at TEXT
-            """)
-
-        cur.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS ocr_values (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -166,12 +271,17 @@ def init_database():
 
                 created_at TEXT,
 
-                FOREIGN KEY (run_id) REFERENCES ocr_runs(id),
-                FOREIGN KEY (tag_id) REFERENCES user_tags(id)
-            )
-        """)
+                FOREIGN KEY (run_id)
+                    REFERENCES ocr_runs(id),
 
-        cur.execute("""
+                FOREIGN KEY (tag_id)
+                    REFERENCES user_tags(id)
+            )
+            """
+        )
+
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS outbound_sensor_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -179,27 +289,20 @@ def init_database():
                 tag_id INTEGER NOT NULL,
 
                 tag_name TEXT NOT NULL,
-
                 sensor_api_key TEXT NOT NULL,
 
                 capture_timestamp INTEGER NOT NULL,
-
                 value REAL NOT NULL,
 
                 status TEXT NOT NULL DEFAULT 'PENDING',
-
                 retry_count INTEGER NOT NULL DEFAULT 0,
 
                 http_status INTEGER,
-
                 response_message TEXT,
-
                 last_error TEXT,
 
                 created_at TEXT,
-
                 last_attempt_at TEXT,
-
                 sent_at TEXT,
 
                 FOREIGN KEY (run_id)
@@ -208,9 +311,11 @@ def init_database():
                 FOREIGN KEY (tag_id)
                     REFERENCES user_tags(id)
             )
-        """)
+            """
+        )
 
-        cur.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS summary_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -221,7 +326,8 @@ def init_database():
 
                 created_at TEXT
             )
-        """)
+            """
+        )
 
         conn.commit()
 
@@ -229,29 +335,104 @@ def init_database():
             "Database schema initialized successfully"
         )
 
-    except Exception:
-        conn.rollback()
-        
-        logger.exception(
-            "Database initialization failed"
+    except sqlite3.IntegrityError:
+        _safe_rollback(
+            conn
         )
+
+        logger.exception(
+            (
+                "Database initialization failed "
+                "because of a constraint violation"
+            )
+        )
+
+        raise
+
+    except sqlite3.OperationalError:
+        _safe_rollback(
+            conn
+        )
+
+        logger.exception(
+            (
+                "Database initialization failed "
+                "because of an SQLite operational error"
+            )
+        )
+
+        raise
+
+    except sqlite3.Error:
+        _safe_rollback(
+            conn
+        )
+
+        logger.exception(
+            (
+                "Database initialization failed "
+                "because of an SQLite error"
+            )
+        )
+
+        raise
+
+    except Exception:
+        _safe_rollback(
+            conn
+        )
+
+        logger.exception(
+            (
+                "Unexpected database "
+                "initialization error"
+            )
+        )
+
         raise
 
     finally:
-        conn.close()
+        _safe_close(
+            conn
+        )
 
 
 def ensure_database():
-    DB_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    """
+    Prepare the database directory and schema.
+    """
+    try:
+        DB_PATH.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-    init_database()
+        init_database()
 
-    logger.info(
-        "Database is ready"
-    )
+        logger.info(
+            "Database is ready"
+        )
+
+    except OSError:
+        logger.exception(
+            (
+                "Cannot prepare database "
+                "directory: %s"
+            ),
+            DB_PATH.parent,
+        )
+
+        raise
+
+    except Exception:
+        # init_database already logs the detailed
+        # database error. This records the startup
+        # stage that failed.
+        logger.error(
+            "Database preparation did not complete"
+        )
+
+        raise
 
 
 if __name__ == "__main__":

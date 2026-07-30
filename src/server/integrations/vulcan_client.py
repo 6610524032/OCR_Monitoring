@@ -1,3 +1,4 @@
+import math
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -20,13 +21,15 @@ VULCAN_SENSOR_DATA_URL = (
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 10
 DEFAULT_READ_TIMEOUT_SECONDS = 20
 
+MAX_RESPONSE_TEXT_LENGTH = 1000
+
 
 def _get_safe_endpoint_name() -> str:
     """
     Return only the destination hostname for logging.
 
-    This avoids logging query strings, credentials,
-    API keys, or request payloads.
+    API keys, query strings, and payloads are not
+    included in the log.
     """
     try:
         parsed_url = urlparse(
@@ -43,26 +46,63 @@ def _get_safe_endpoint_name() -> str:
 
 
 def build_vulcan_payload(
-    sensor_values: list[dict[str, Any]]
+    sensor_values: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
     """
-    Convert OCR sensor values into the payload required
-    by the Vulcan sensor-data API.
-
-    Each item in sensor_values must contain:
-    - sensor_api_key
-    - capture_timestamp
-    - value
+    Convert sensor values to the Vulcan API format.
     """
+    if not isinstance(
+        sensor_values,
+        list,
+    ):
+        logger.error(
+            "Vulcan sensor values must be a list"
+        )
+
+        raise ValueError(
+            "Sensor values must be a list"
+        )
+
+    if not sensor_values:
+        logger.error(
+            "No sensor values were provided"
+        )
+
+        raise ValueError(
+            "No sensor values were provided"
+        )
+
     sensors = []
 
     for index, item in enumerate(
         sensor_values
     ):
+        sensor_number = index + 1
+
+        if not isinstance(
+            item,
+            dict,
+        ):
+            logger.error(
+                (
+                    "Invalid sensor data type: "
+                    "sensor_number=%d, type=%s"
+                ),
+                sensor_number,
+                type(item).__name__,
+            )
+
+            raise ValueError(
+                (
+                    "Invalid data for "
+                    f"sensor number {sensor_number}"
+                )
+            )
+
         api_key = str(
             item.get(
                 "sensor_api_key",
-                ""
+                "",
             )
         ).strip()
 
@@ -76,38 +116,50 @@ def build_vulcan_payload(
 
         if not api_key:
             logger.error(
-                "Missing API key for sensor %d",
-                index + 1,
+                (
+                    "Missing API key for "
+                    "sensor number %d"
+                ),
+                sensor_number,
             )
 
             raise ValueError(
-                f"Sensor number {index + 1} "
-                "does not have an API key"
+                (
+                    f"Sensor number {sensor_number} "
+                    "does not have an API key"
+                )
             )
 
         if capture_timestamp is None:
             logger.error(
                 (
                     "Missing capture timestamp "
-                    "for sensor %d"
+                    "for sensor number %d"
                 ),
-                index + 1,
+                sensor_number,
             )
 
             raise ValueError(
-                f"Sensor number {index + 1} "
-                "does not have a capture timestamp"
+                (
+                    f"Sensor number {sensor_number} "
+                    "does not have a capture timestamp"
+                )
             )
 
         if value is None:
             logger.error(
-                "Missing value for sensor %d",
-                index + 1,
+                (
+                    "Missing value for "
+                    "sensor number %d"
+                ),
+                sensor_number,
             )
 
             raise ValueError(
-                f"Sensor number {index + 1} "
-                "does not have a value"
+                (
+                    f"Sensor number {sensor_number} "
+                    "does not have a value"
+                )
             )
 
         try:
@@ -118,19 +170,38 @@ def build_vulcan_payload(
         except (
             TypeError,
             ValueError,
+            OverflowError,
         ) as error:
             logger.error(
                 (
                     "Invalid capture timestamp "
-                    "for sensor %d"
+                    "for sensor number %d"
                 ),
-                index + 1,
+                sensor_number,
             )
 
             raise ValueError(
-                "Invalid capture timestamp for "
-                f"sensor number {index + 1}"
+                (
+                    "Invalid capture timestamp for "
+                    f"sensor number {sensor_number}"
+                )
             ) from error
+
+        if timestamp_value < 0:
+            logger.error(
+                (
+                    "Negative capture timestamp "
+                    "for sensor number %d"
+                ),
+                sensor_number,
+            )
+
+            raise ValueError(
+                (
+                    "Invalid capture timestamp for "
+                    f"sensor number {sensor_number}"
+                )
+            )
 
         try:
             numeric_value = float(
@@ -140,41 +211,60 @@ def build_vulcan_payload(
         except (
             TypeError,
             ValueError,
+            OverflowError,
         ) as error:
             logger.error(
                 (
                     "Invalid sensor value "
-                    "for sensor %d"
+                    "for sensor number %d"
                 ),
-                index + 1,
+                sensor_number,
             )
 
             raise ValueError(
-                "Invalid sensor value for "
-                f"sensor number {index + 1}"
+                (
+                    "Invalid sensor value for "
+                    f"sensor number {sensor_number}"
+                )
             ) from error
+
+        if not math.isfinite(
+            numeric_value
+        ):
+            logger.error(
+                (
+                    "Non-finite sensor value "
+                    "for sensor number %d"
+                ),
+                sensor_number,
+            )
+
+            raise ValueError(
+                (
+                    "Invalid sensor value for "
+                    f"sensor number {sensor_number}"
+                )
+            )
 
         sensors.append({
             "apikey": api_key,
             "data": [
                 {
-                    "timestamp": timestamp_value,
-                    "value": numeric_value,
+                    "timestamp": (
+                        timestamp_value
+                    ),
+                    "value": (
+                        numeric_value
+                    ),
                 }
             ],
         })
 
-    if not sensors:
-        logger.error(
-            "No sensor values were provided"
-        )
-
-        raise ValueError(
-            "No sensor values were provided"
-        )
-
     logger.info(
-        "Built Vulcan payload for %d sensor(s)",
+        (
+            "Built Vulcan payload "
+            "for %d sensor(s)"
+        ),
         len(sensors),
     )
 
@@ -190,7 +280,7 @@ def _create_failed_result(
     response: Any = None,
 ) -> dict[str, Any]:
     """
-    Create a standard failed result.
+    Return a standard failed result.
     """
     return {
         "ok": False,
@@ -201,6 +291,28 @@ def _create_failed_result(
     }
 
 
+def _read_response_data(
+    response: requests.Response,
+) -> Any:
+    """
+    Read the response safely.
+
+    When the response is not JSON, only a limited
+    amount of text is retained.
+    """
+    try:
+        return response.json()
+
+    except ValueError:
+        response_text = str(
+            response.text or ""
+        ).strip()
+
+        return response_text[
+            :MAX_RESPONSE_TEXT_LENGTH
+        ]
+
+
 def send_sensor_values_to_vulcan(
     sensor_values: list[dict[str, Any]],
     timeout_seconds: int | None = None,
@@ -208,14 +320,12 @@ def send_sensor_values_to_vulcan(
     """
     Build and send sensor values to Vulcan.
 
-    The request uses separate connect and read timeouts
-    so the log can identify which stage failed.
-
-    The timeout_seconds argument is retained for
-    compatibility with existing callers. When provided,
-    it is used as the read timeout.
+    Errors are returned as dictionaries so the
+    Sender Worker can continue running.
     """
     payload = None
+    response = None
+
     endpoint_name = (
         _get_safe_endpoint_name()
     )
@@ -237,15 +347,22 @@ def send_sensor_values_to_vulcan(
 
         if read_timeout <= 0:
             raise ValueError(
-                "Timeout must be greater than zero"
+                (
+                    "Timeout must be "
+                    "greater than zero"
+                )
             )
 
     except (
         TypeError,
         ValueError,
+        OverflowError,
     ) as error:
         logger.error(
-            "Invalid Vulcan timeout setting: %s",
+            (
+                "Invalid Vulcan timeout "
+                "setting: %s"
+            ),
             error,
         )
 
@@ -261,15 +378,37 @@ def send_sensor_values_to_vulcan(
             sensor_values
         )
 
-    except ValueError as error:
+    except (
+        TypeError,
+        ValueError,
+        AttributeError,
+    ) as error:
         logger.error(
-            "Cannot build Vulcan payload: %s",
+            (
+                "Cannot build Vulcan "
+                "payload: %s"
+            ),
             error,
         )
 
         return _create_failed_result(
             message=str(
                 error
+            ),
+            payload=None,
+        )
+
+    except Exception:
+        logger.exception(
+            (
+                "Unexpected error while "
+                "building Vulcan payload"
+            )
+        )
+
+        return _create_failed_result(
+            message=(
+                "Cannot build Vulcan payload"
             ),
             payload=None,
         )
@@ -301,6 +440,80 @@ def send_sensor_values_to_vulcan(
                 read_timeout,
             ),
         )
+
+        elapsed_seconds = (
+            time.monotonic()
+            - request_started_at
+        )
+
+        response_data = (
+            _read_response_data(
+                response
+            )
+        )
+
+        logger.info(
+            (
+                "Vulcan API response received: "
+                "destination=%s, "
+                "status_code=%d, "
+                "elapsed=%.2fs"
+            ),
+            endpoint_name,
+            response.status_code,
+            elapsed_seconds,
+        )
+
+        if not response.ok:
+            logger.error(
+                (
+                    "Vulcan API returned an error: "
+                    "destination=%s, "
+                    "status_code=%d, "
+                    "elapsed=%.2fs"
+                ),
+                endpoint_name,
+                response.status_code,
+                elapsed_seconds,
+            )
+
+            return _create_failed_result(
+                message=(
+                    "Vulcan API returned an error"
+                ),
+                payload=payload,
+                status_code=(
+                    response.status_code
+                ),
+                response=response_data,
+            )
+
+        logger.info(
+            (
+                "Successfully sent sensor data "
+                "to Vulcan: "
+                "destination=%s, "
+                "sensor_count=%d, "
+                "status_code=%d, "
+                "elapsed=%.2fs"
+            ),
+            endpoint_name,
+            len(sensor_values),
+            response.status_code,
+            elapsed_seconds,
+        )
+
+        return {
+            "ok": True,
+            "message": (
+                "Sensor values sent to Vulcan"
+            ),
+            "status_code": (
+                response.status_code
+            ),
+            "payload": payload,
+            "response": response_data,
+        }
 
     except requests.ConnectTimeout as error:
         elapsed_seconds = (
@@ -363,13 +576,11 @@ def send_sensor_values_to_vulcan(
                 "Vulcan SSL connection failed: "
                 "destination=%s, "
                 "elapsed=%.2fs, "
-                "error_type=%s, "
-                "error=%s"
+                "error_type=%s"
             ),
             endpoint_name,
             elapsed_seconds,
             type(error).__name__,
-            error,
         )
 
         return _create_failed_result(
@@ -390,13 +601,11 @@ def send_sensor_values_to_vulcan(
                 "Cannot connect to Vulcan API: "
                 "destination=%s, "
                 "elapsed=%.2fs, "
-                "error_type=%s, "
-                "error=%s"
+                "error_type=%s"
             ),
             endpoint_name,
             elapsed_seconds,
             type(error).__name__,
-            error,
         )
 
         return _create_failed_result(
@@ -442,13 +651,11 @@ def send_sensor_values_to_vulcan(
                 "Unexpected Vulcan request error: "
                 "destination=%s, "
                 "elapsed=%.2fs, "
-                "error_type=%s, "
-                "error=%s"
+                "error_type=%s"
             ),
             endpoint_name,
             elapsed_seconds,
             type(error).__name__,
-            error,
         )
 
         return _create_failed_result(
@@ -483,76 +690,6 @@ def send_sensor_values_to_vulcan(
             payload=payload,
         )
 
-    elapsed_seconds = (
-        time.monotonic()
-        - request_started_at
-    )
-
-    logger.info(
-        (
-            "Vulcan API response received: "
-            "destination=%s, "
-            "status_code=%d, "
-            "elapsed=%.2fs"
-        ),
-        endpoint_name,
-        response.status_code,
-        elapsed_seconds,
-    )
-
-    try:
-        response_data = (
-            response.json()
-        )
-
-    except ValueError:
-        response_data = (
-            response.text
-        )
-
-    if not response.ok:
-        logger.error(
-            (
-                "Vulcan API returned an error: "
-                "destination=%s, "
-                "status_code=%d, "
-                "elapsed=%.2fs"
-            ),
-            endpoint_name,
-            response.status_code,
-            elapsed_seconds,
-        )
-
-        return _create_failed_result(
-            message=(
-                "Vulcan API returned an error"
-            ),
-            payload=payload,
-            status_code=response.status_code,
-            response=response_data,
-        )
-
-    logger.info(
-        (
-            "Successfully sent sensor data "
-            "to Vulcan: "
-            "destination=%s, "
-            "sensor_count=%d, "
-            "status_code=%d, "
-            "elapsed=%.2fs"
-        ),
-        endpoint_name,
-        len(sensor_values),
-        response.status_code,
-        elapsed_seconds,
-    )
-
-    return {
-        "ok": True,
-        "message": (
-            "Sensor values sent to Vulcan"
-        ),
-        "status_code": response.status_code,
-        "payload": payload,
-        "response": response_data,
-    }
+    finally:
+        if response is not None:
+            response.close()

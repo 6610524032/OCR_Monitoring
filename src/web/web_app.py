@@ -424,17 +424,10 @@ def video_feed():
 
 
 def generate_camera_frames():
-    while True:
-        try:
-            camera = reload_camera_config()
+    cap = None
 
-        except CameraConfigError:
-            logger.exception(
-                "Failed to load live camera configuration"
-            )
-
-            time.sleep(2)
-            continue
+    try:
+        camera = reload_camera_config()
 
         cap = cv2.VideoCapture(
             camera.rtsp_url,
@@ -443,53 +436,71 @@ def generate_camera_frames():
 
         if not cap.isOpened():
             logger.warning(
-                "Cannot open RTSP stream"
+                "Live camera connection failed"
             )
 
-            cap.release()
-            time.sleep(2)
-            continue
+            return
 
-        logger.debug(
+        logger.info(
             "Live camera stream connected"
         )
 
-        try:
-            while True:
-                success, frame = cap.read()
+        while True:
+            success, frame = cap.read()
 
-                if not success:
-                    logger.warning(
-                        "Cannot read RTSP frame"
-                    )
-                    break
-
-                encoded, buffer = cv2.imencode(
-                    ".jpg",
-                    frame,
+            if not success:
+                logger.warning(
+                    "Live camera stopped responding"
                 )
 
-                if not encoded:
-                    continue
+                return
 
-                frame_bytes = buffer.tobytes()
-
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n"
-                    + frame_bytes
-                    + b"\r\n"
-                )
-
-        except Exception:
-            logger.exception(
-                "Unexpected live camera stream error"
+            encoded, buffer = cv2.imencode(
+                ".jpg",
+                frame,
             )
 
-        finally:
-            cap.release()
+            if not encoded:
+                logger.warning(
+                    "Cannot encode live camera frame"
+                )
 
-        time.sleep(2)
+                continue
+
+            frame_bytes = buffer.tobytes()
+
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + frame_bytes
+                + b"\r\n"
+            )
+
+    except CameraConfigError as error:
+        logger.warning(
+            "Live camera is unavailable: %s",
+            error,
+        )
+
+        return
+
+    except GeneratorExit:
+        logger.info(
+            "Live camera viewer disconnected"
+        )
+
+        return
+
+    except Exception:
+        logger.exception(
+            "Unexpected live camera stream error"
+        )
+
+        return
+
+    finally:
+        if cap is not None:
+            cap.release()
 
 
 @app.route(
@@ -572,6 +583,7 @@ def web_api_proxy(api_path):
                 api_path,
                 response.status_code,
             )
+
 
         if response.status_code >= 500:
             logger.warning(
