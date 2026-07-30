@@ -373,6 +373,14 @@ def history():
     )
 
 
+@app.route("/logs")
+@login_required
+def logs_page():
+    return render_template(
+        "logs.html"
+    )
+
+
 @app.route("/live")
 @login_required
 def live():
@@ -490,11 +498,16 @@ def generate_camera_frames():
 )
 @login_required_json
 def web_api_proxy(api_path):
-    logger.info(
-        "Proxy request: %s %s",
-        request.method,
-        api_path,
+    is_log_viewer_request = (
+        api_path == "api/system/logs"
     )
+
+    if not is_log_viewer_request:
+        logger.info(
+            "Proxy request: %s %s",
+            request.method,
+            api_path,
+        )
 
     if not api_path.startswith("api/"):
         logger.warning(
@@ -553,11 +566,12 @@ def web_api_proxy(api_path):
                 timeout=proxy_timeout,
             )
 
-        logger.info(
-            "Proxy response %s -> HTTP %s",
-            api_path,
-            response.status_code,
-        )
+        if not is_log_viewer_request:
+            logger.info(
+                "Proxy response %s -> HTTP %s",
+                api_path,
+                response.status_code,
+            )
 
         if response.status_code >= 500:
             logger.warning(

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>System Logs</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/navbar.css') }}"
+    >
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/logs.css') }}"
+    >
+</head>
+
+<body>
+
+{% include 'navbar.html' %}
+
+<main class="logs-container">
+
+    <section class="logs-card">
+
+        <div class="logs-toolbar">
+
+            <div class="logs-control">
+                <label for="lineCountSelect">
+                    จำนวนบรรทัด
+                </label>
+
+                <select id="lineCountSelect">
+                    <option value="100">
+                        100
+                    </option>
+
+                    <option value="500" selected>
+                        500
+                    </option>
+
+                    <option value="1000">
+                        1,000
+                    </option>
+
+                    <option value="2000">
+                        2,000
+                    </option>
+                </select>
+            </div>
+
+            <div class="logs-control">
+                <label for="levelFilterSelect">
+                    ระดับ Log
+                </label>
+
+                <select id="levelFilterSelect">
+                    <option value="ALL">
+                        All
+                    </option>
+
+                    <option value="DEBUG">
+                        DEBUG
+                    </option>
+
+                    <option value="INFO">
+                        INFO
+                    </option>
+
+                    <option value="WARNING">
+                        WARNING
+                    </option>
+
+                    <option value="ERROR">
+                        ERROR
+                    </option>
+
+                    <option value="CRITICAL">
+                        CRITICAL
+                    </option>
+                </select>
+            </div>
+
+            <label class="auto-refresh-control">
+                <input
+                    id="autoRefreshCheckbox"
+                    type="checkbox"
+                    checked
+                >
+
+                Auto Refresh
+            </label>
+
+            <button
+                id="refreshLogsBtn"
+                type="button"
+            >
+                Refresh
+            </button>
+
+        </div>
+
+        <div class="logs-summary">
+
+            <span
+                id="logsStatus"
+                class="logs-status loading"
+            >
+                Loading logs...
+            </span>
+
+            <span id="logsCount">
+                0 lines
+            </span>
+
+        </div>
+
+        <div class="logs-viewer-wrapper">
+
+            <pre
+                id="logsViewer"
+                class="logs-viewer"
+                tabindex="0"
+            >Loading logs...</pre>
+
+        </div>
+
+    </section>
+
+</main>
+
+<script
+    src="{{ url_for('static', filename='js/logs.js') }}"
+></script>
+
+</body>
+</html>

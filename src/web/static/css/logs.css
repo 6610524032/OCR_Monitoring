@@ -1,0 +1,299 @@
+/* =====================================================
+   BASE
+===================================================== */
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    color: #111827;
+    background: #eef2f7;
+}
+
+.logs-container {
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+
+/* =====================================================
+   LOG CARD
+===================================================== */
+
+.logs-card {
+    padding: 20px;
+
+    border-radius: 14px;
+
+    background: #ffffff;
+    box-shadow:
+        0 4px 12px
+        rgba(0, 0, 0, 0.08);
+}
+
+
+/* =====================================================
+   TOOLBAR
+===================================================== */
+
+.logs-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.logs-control {
+    min-width: 170px;
+}
+
+.logs-control label {
+    display: block;
+
+    margin-bottom: 7px;
+
+    color: #374151;
+
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.logs-control select {
+    width: 100%;
+    padding: 10px 12px;
+
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+
+    color: #111827;
+    background: #ffffff;
+
+    font-size: 14px;
+}
+
+.logs-control select:focus {
+    border-color: #2563eb;
+    outline: 2px solid rgba(37, 99, 235, 0.15);
+}
+
+
+/* =====================================================
+   AUTO REFRESH
+===================================================== */
+
+.auto-refresh-control {
+    display: flex;
+    align-items: center;
+
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 4px;
+
+    color: #374151;
+
+    font-size: 14px;
+    font-weight: 700;
+
+    cursor: pointer;
+}
+
+.auto-refresh-control input {
+    width: 18px;
+    height: 18px;
+
+    accent-color: #2563eb;
+}
+
+
+/* =====================================================
+   REFRESH BUTTON
+===================================================== */
+
+#refreshLogsBtn {
+    min-height: 40px;
+    padding: 10px 18px;
+
+    border: none;
+    border-radius: 8px;
+
+    color: #ffffff;
+    background: #2563eb;
+
+    font-size: 14px;
+    font-weight: 700;
+
+    cursor: pointer;
+}
+
+#refreshLogsBtn:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+#refreshLogsBtn:disabled {
+    background: #9ca3af;
+
+    cursor: not-allowed;
+}
+
+
+/* =====================================================
+   SUMMARY
+===================================================== */
+
+.logs-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.logs-status {
+    display: inline-flex;
+    align-items: center;
+
+    min-height: 30px;
+    padding: 6px 10px;
+
+    border-radius: 999px;
+
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.logs-status.loading {
+    color: #1d4ed8;
+    background: #dbeafe;
+}
+
+.logs-status.ready {
+    color: #166534;
+    background: #dcfce7;
+}
+
+.logs-status.empty {
+    color: #92400e;
+    background: #fef3c7;
+}
+
+.logs-status.error {
+    color: #991b1b;
+    background: #fee2e2;
+}
+
+#logsCount {
+    color: #6b7280;
+
+    font-size: 13px;
+}
+
+
+/* =====================================================
+   LOG VIEWER
+===================================================== */
+
+.logs-viewer-wrapper {
+    overflow: hidden;
+
+    border: 1px solid #1f2937;
+    border-radius: 10px;
+
+    background: #111827;
+}
+
+.logs-viewer {
+    width: 100%;
+    min-height: 560px;
+    max-height: 72vh;
+    margin: 0;
+    padding: 18px;
+    overflow: auto;
+
+    box-sizing: border-box;
+
+    color: #d1d5db;
+    background: #111827;
+
+    font-family:
+        Consolas,
+        "Courier New",
+        monospace;
+
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+
+    tab-size: 4;
+}
+
+
+/* =====================================================
+   SCROLLBAR
+===================================================== */
+
+.logs-viewer::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.logs-viewer::-webkit-scrollbar-track {
+    background: #1f2937;
+}
+
+.logs-viewer::-webkit-scrollbar-thumb {
+    border: 3px solid #1f2937;
+    border-radius: 999px;
+
+    background: #6b7280;
+}
+
+.logs-viewer::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+
+
+/* =====================================================
+   RESPONSIVE
+===================================================== */
+
+@media (max-width: 700px) {
+    .logs-container {
+        padding: 12px;
+    }
+
+    .logs-card {
+        padding: 14px;
+    }
+
+    .logs-toolbar {
+        display: block;
+    }
+
+    .logs-control,
+    .auto-refresh-control,
+    #refreshLogsBtn {
+        width: 100%;
+        margin-bottom: 12px;
+    }
+
+    #refreshLogsBtn {
+        display: block;
+    }
+
+    .logs-summary {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .logs-viewer {
+        min-height: 500px;
+        padding: 14px;
+
+        font-size: 12px;
+    }
+}
