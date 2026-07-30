@@ -1,12 +1,11 @@
 from datetime import datetime
-
 import sqlite3
 
 from src.logger import create_logger
 from src.server.database import (
     get_connection,
     get_or_create_active_summary_table,
-    make_summary_column_name
+    make_summary_column_name,
 )
 
 
@@ -15,49 +14,54 @@ logger = create_logger(
 )
 
 
-def save_summary_row(
-    run_id,
-    edit_type="OCR"
-):
+def save_summary_row(run_id):
+    """
+    Create or replace a summary row for one OCR run.
+    """
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
     try:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT *
             FROM ocr_runs
             WHERE id = ?
             LIMIT 1
-        """, (run_id,))
+            """,
+            (run_id,),
+        )
 
         run = cur.fetchone()
 
         if run is None:
             logger.warning(
                 "OCR run %s not found for summary",
-                run_id
+                run_id,
             )
             return
 
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 tag_name,
                 unit,
-                value,
-                raw_text,
-                created_at
+                value
             FROM ocr_values
             WHERE run_id = ?
             ORDER BY id
-        """, (run_id,))
+            """,
+            (run_id,),
+        )
 
         values = [
             dict(row)
             for row in cur.fetchall()
         ]
 
-        cur.execute("""
+        cur.execute(
+            """
             SELECT
                 tag_name,
                 unit,
@@ -67,7 +71,8 @@ def save_summary_row(
             ORDER BY
                 display_order ASC,
                 id ASC
-        """)
+            """
+        )
 
         tags = [
             dict(row)
@@ -101,7 +106,7 @@ def save_summary_row(
         column_name = (
             make_summary_column_name(
                 item["tag_name"],
-                item.get("unit", "")
+                item.get("unit", ""),
             )
         )
 
@@ -112,26 +117,24 @@ def save_summary_row(
     columns = [
         "run_id",
         "ocr_status",
-        "review_status",
-        "edit_type",
-        "ocr_time"
+        "ocr_time",
     ]
 
     row_values = [
         run["id"],
         run["status"] or "",
-        run["review_status"] or "",
-        edit_type,
-        run["ocr_time"]
-        or run["created_at"]
-        or ""
+        (
+            run["ocr_time"]
+            or run["created_at"]
+            or ""
+        ),
     ]
 
     for tag in tags:
         column_name = (
             make_summary_column_name(
                 tag["tag_name"],
-                tag.get("unit", "")
+                tag.get("unit", ""),
             )
         )
 
@@ -142,7 +145,7 @@ def save_summary_row(
         row_values.append(
             value_map.get(
                 column_name,
-                ""
+                "",
             )
         )
 
@@ -161,10 +164,8 @@ def save_summary_row(
     )
 
     quoted_columns = ", ".join(
-        [
-            f'"{col}"'
-            for col in columns
-        ]
+        f'"{column}"'
+        for column in columns
     )
 
     conn = get_connection()
@@ -173,30 +174,29 @@ def save_summary_row(
     try:
         cur.execute(
             f"""
-            DELETE FROM {table_name}
+            DELETE FROM "{table_name}"
             WHERE run_id = ?
             """,
-            (run_id,)
+            (run_id,),
         )
 
         cur.execute(
             f"""
-            INSERT INTO {table_name} (
+            INSERT INTO "{table_name}" (
                 {quoted_columns}
             )
             VALUES (
                 {placeholders}
             )
             """,
-            row_values
+            row_values,
         )
 
         conn.commit()
 
         logger.info(
-            "Summary row saved for run %s (%s)",
+            "Summary row saved for run %s",
             run_id,
-            edit_type
         )
 
     except Exception:
@@ -205,7 +205,6 @@ def save_summary_row(
         logger.exception(
             "Failed to save summary row"
         )
-
         raise
 
     finally:

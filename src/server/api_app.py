@@ -8,7 +8,6 @@ from src.server.routes.system_routes import system_bp
 from src.server.routes.camera_routes import camera_bp
 from src.server.routes.calibration_routes import calibration_bp
 from src.server.routes.history_routes import history_bp
-from src.server.routes.review_routes import review_bp
 from src.server.routes.tag_routes import tag_bp
 from src.server.routes.worker_routes import worker_bp
 
@@ -42,7 +41,6 @@ def create_app() -> Flask:
     app.register_blueprint(camera_bp)
     app.register_blueprint(calibration_bp)
     app.register_blueprint(history_bp)
-    app.register_blueprint(review_bp)
     app.register_blueprint(tag_bp)
     app.register_blueprint(worker_bp)
 

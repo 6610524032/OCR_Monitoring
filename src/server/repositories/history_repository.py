@@ -109,10 +109,6 @@ def get_latest_log():
                 run_dict.get("status")
                 or "UNKNOWN"
             ),
-            "ocr_status": (
-                run_dict.get("status")
-                or "UNKNOWN"
-            ),
             "missing_tags": (
                 run_dict.get("missing_tags")
                 or ""
@@ -144,7 +140,7 @@ def get_latest_log():
             conn.close()
 
 
-def get_history_runs(limit=50):
+def get_abnormal_history_runs():
     conn = get_connection()
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
@@ -155,39 +151,46 @@ def get_history_runs(limit=50):
                 id,
                 ocr_time,
                 status,
-                review_status,
                 missing_tags,
                 alert_message,
-                raw_image_path,
-                calibrated_image_path,
                 created_at
             FROM ocr_runs
-            ORDER BY id DESC
-            LIMIT ?
-        """, (limit,))
+            WHERE
+                status != 'NORMAL'
+                OR COALESCE(
+                    TRIM(missing_tags),
+                    ''
+                ) != ''
+            ORDER BY
+                COALESCE(
+                    ocr_time,
+                    created_at
+                ) DESC,
+                id DESC
+        """)
 
-        runs = [
+        items = [
             dict(row)
             for row in cur.fetchall()
         ]
 
         logger.info(
-            "Loaded %d history run(s)",
-            len(runs)
+            "Loaded %d abnormal OCR run(s)",
+            len(items)
         )
 
-        return runs
+        return items
 
     except Exception:
         logger.exception(
-            "Failed to load history runs"
+            "Failed to load abnormal OCR runs"
         )
         raise
 
     finally:
         conn.close()
 
-
+        
 def get_history_run_detail(run_id):
     conn = get_connection()
     conn.row_factory = sqlite3.Row
@@ -216,8 +219,7 @@ def get_history_run_detail(run_id):
             SELECT
                 tag_name,
                 unit,
-                value,
-                raw_text
+                value
             FROM ocr_values
             WHERE run_id = ?
             ORDER BY id
@@ -229,15 +231,21 @@ def get_history_run_detail(run_id):
         ]
 
         raw_path = (
-            run_dict.get(
-                "raw_image_path"
+            normalize_image_path(
+                run_dict.get(
+                    "raw_image_path"
+                ),
+                RAW_IMAGES_DIR
             )
             or ""
         )
 
         calibrated_path = (
-            run_dict.get(
-                "calibrated_image_path"
+            normalize_image_path(
+                run_dict.get(
+                    "calibrated_image_path"
+                ),
+                CALIBRATED_IMAGES_DIR
             )
             or ""
         )
@@ -328,13 +336,8 @@ def get_history_data(tag_name, days=2):
                 r.ocr_time,
                 r.status,
                 r.missing_tags,
-                r.alert_message,
-                r.raw_image_path,
-                r.calibrated_image_path,
-                v.tag_name,
                 v.unit,
-                v.value,
-                v.raw_text
+                v.value
             FROM ocr_runs r
             LEFT JOIN ocr_values v
                 ON v.run_id = r.id

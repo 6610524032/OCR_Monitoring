@@ -127,7 +127,6 @@ def init_database():
                 ocr_time TEXT,
 
                 status TEXT DEFAULT 'NORMAL',
-                review_status TEXT DEFAULT 'PENDING',
 
                 missing_tags TEXT,
                 alert_message TEXT,
@@ -231,6 +230,8 @@ def init_database():
         )
 
     except Exception:
+        conn.rollback()
+        
         logger.exception(
             "Database initialization failed"
         )

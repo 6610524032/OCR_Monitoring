@@ -3,10 +3,10 @@ from datetime import datetime
 from src.logger import create_logger
 from src.server.database import (
     get_connection,
-    to_relative_path
+    to_relative_path,
 )
 from src.server.repositories.summary_repository import (
-    save_summary_row
+    save_summary_row,
 )
 
 
@@ -20,44 +20,45 @@ def create_ocr_run(
     calibrated_image_path,
     status,
     missing_tags,
-    alert_message
+    alert_message,
 ):
     now = datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S"
-    )
-
-    review_status = (
-        "ACCEPTED"
-        if status == "NORMAL"
-        else "PENDING"
     )
 
     conn = get_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO ocr_runs (
                 raw_image_path,
                 calibrated_image_path,
                 ocr_time,
                 status,
-                review_status,
                 missing_tags,
                 alert_message,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            to_relative_path(raw_image_path),
-            to_relative_path(calibrated_image_path),
-            now,
-            status,
-            review_status,
-            ",".join(missing_tags),
-            alert_message,
-            now
-        ))
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                to_relative_path(
+                    raw_image_path
+                ),
+                to_relative_path(
+                    calibrated_image_path
+                ),
+                now,
+                status,
+                ",".join(
+                    missing_tags or []
+                ),
+                alert_message,
+                now,
+            ),
+        )
 
         run_id = cur.lastrowid
 
@@ -65,7 +66,7 @@ def create_ocr_run(
 
         logger.info(
             "OCR run %s created",
-            run_id
+            run_id,
         )
 
         return run_id
@@ -87,7 +88,7 @@ def save_ocr_value(
     run_id,
     tag,
     value,
-    raw_text
+    raw_text,
 ):
     now = datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S"
@@ -97,7 +98,8 @@ def save_ocr_value(
     cur = conn.cursor()
 
     try:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO ocr_values (
                 run_id,
                 tag_id,
@@ -108,21 +110,23 @@ def save_ocr_value(
                 created_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            run_id,
-            tag["id"],
-            tag["tag_name"],
-            tag.get("unit", ""),
-            value,
-            raw_text,
-            now
-        ))
+            """,
+            (
+                run_id,
+                tag["id"],
+                tag["tag_name"],
+                tag.get("unit", ""),
+                value,
+                raw_text,
+                now,
+            ),
+        )
 
         conn.commit()
 
         logger.info(
             "Saved OCR value for run %s",
-            run_id
+            run_id,
         )
 
     except Exception:
@@ -145,53 +149,55 @@ def save_worker_ocr_run(
     status,
     missing_tags,
     alert_message,
-    captured_at
+    captured_at,
 ):
     now = datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S"
-    )
-
-    review_status = (
-        "ACCEPTED"
-        if status == "NORMAL"
-        else "PENDING"
     )
 
     conn = get_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO ocr_runs (
                 raw_image_path,
                 calibrated_image_path,
                 ocr_time,
                 status,
-                review_status,
                 missing_tags,
                 alert_message,
                 captured_at,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            to_relative_path(raw_image_path),
-            to_relative_path(calibrated_image_path),
-            now,
-            status,
-            review_status,
-            ",".join(missing_tags),
-            alert_message,
-            captured_at,
-            now
-        ))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                to_relative_path(
+                    raw_image_path
+                ),
+                to_relative_path(
+                    calibrated_image_path
+                ),
+                now,
+                status,
+                ",".join(
+                    missing_tags or []
+                ),
+                alert_message,
+                captured_at,
+                now,
+            ),
+        )
 
         run_id = cur.lastrowid
 
         for item in results:
             tag = item["tag"]
 
-            cur.execute("""
+            cur.execute(
+                """
                 INSERT INTO ocr_values (
                     run_id,
                     tag_id,
@@ -202,22 +208,34 @@ def save_worker_ocr_run(
                     created_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run_id,
-                tag["id"],
-                tag["tag_name"],
-                tag.get("unit", ""),
-                str(item.get("value", "")),
-                str(item.get("raw_text", "")),
-                now
-            ))
+                """,
+                (
+                    run_id,
+                    tag["id"],
+                    tag["tag_name"],
+                    tag.get("unit", ""),
+                    str(
+                        item.get(
+                            "value",
+                            "",
+                        )
+                    ),
+                    str(
+                        item.get(
+                            "raw_text",
+                            "",
+                        )
+                    ),
+                    now,
+                ),
+            )
 
         conn.commit()
 
         logger.info(
             "Worker OCR run %s saved with %d value(s)",
             run_id,
-            len(results)
+            len(results),
         )
 
     except Exception:
@@ -233,13 +251,12 @@ def save_worker_ocr_run(
         conn.close()
 
     save_summary_row(
-        run_id=run_id,
-        edit_type="OCR"
+        run_id=run_id
     )
 
     logger.info(
         "Summary row created for run %s",
-        run_id
+        run_id,
     )
 
     return run_id

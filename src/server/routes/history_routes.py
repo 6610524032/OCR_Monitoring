@@ -1,13 +1,17 @@
-from flask import Blueprint, jsonify, request
+from flask import (
+    Blueprint,
+    jsonify,
+    request,
+)
 
 from src.logger import create_logger
 from src.server.auth import require_api_key
 from src.server.repositories.history_repository import (
+    get_abnormal_history_runs,
     get_history_data,
     get_history_run_detail,
-    get_history_runs,
     get_history_variables,
-    get_latest_log
+    get_latest_log,
 )
 
 
@@ -18,11 +22,13 @@ logger = create_logger(
 
 history_bp = Blueprint(
     "history",
-    __name__
+    __name__,
 )
 
 
-@history_bp.route("/api/latest")
+@history_bp.route(
+    "/api/latest"
+)
 @require_api_key
 def api_latest():
     try:
@@ -36,8 +42,10 @@ def api_latest():
             return jsonify({
                 "ok": True,
                 "has_data": False,
-                "message": "No OCR data found",
-                "data": None
+                "message": (
+                    "No OCR data found"
+                ),
+                "data": None,
             })
 
         logger.info(
@@ -47,7 +55,7 @@ def api_latest():
         return jsonify({
             "ok": True,
             "has_data": True,
-            "data": latest
+            "data": latest,
         })
 
     except Exception:
@@ -59,42 +67,45 @@ def api_latest():
             "ok": False,
             "message": (
                 "Failed to load latest OCR data"
-            )
+            ),
         }), 500
 
 
-@history_bp.route("/api/history")
+@history_bp.route(
+    "/api/history/alerts"
+)
 @require_api_key
-def api_history():
+def api_history_alerts():
     try:
-        runs = get_history_runs(
-            limit=50
+        items = (
+            get_abnormal_history_runs()
         )
 
         logger.info(
-            "History list loaded (%d run(s))",
-            len(runs)
+            "Abnormal history loaded "
+            "(%d item(s))",
+            len(items),
         )
 
         return jsonify({
             "ok": True,
-            "count": len(runs),
-            "items": runs
+            "count": len(items),
+            "items": items,
         })
 
     except Exception:
         logger.exception(
-            "Failed to load history list"
+            "Failed to load abnormal history"
         )
 
         return jsonify({
             "ok": False,
             "message": (
-                "Failed to load history list"
-            )
+                "Failed to load abnormal history"
+            ),
         }), 500
 
-
+        
 @history_bp.route(
     "/api/history/variables"
 )
@@ -106,13 +117,14 @@ def api_history_variables():
         )
 
         logger.info(
-            "History variables loaded (%d variable(s))",
-            len(variables)
+            "History variables loaded "
+            "(%d variable(s))",
+            len(variables),
         )
 
         return jsonify({
             "ok": True,
-            "variables": variables
+            "variables": variables,
         })
 
     except Exception:
@@ -124,7 +136,7 @@ def api_history_variables():
             "ok": False,
             "message": (
                 "Failed to load history variables"
-            )
+            ),
         }), 500
 
 
@@ -136,35 +148,39 @@ def api_history_data():
     try:
         tag_name = request.args.get(
             "tag_name",
-            ""
+            "",
         ).strip()
 
-        if tag_name == "":
+        if not tag_name:
             logger.warning(
-                "History data requested without tag_name"
+                "History data requested "
+                "without tag_name"
             )
 
             return jsonify({
                 "ok": False,
-                "message": "tag_name is required",
-                "points": []
-            })
+                "message": (
+                    "tag_name is required"
+                ),
+                "points": [],
+            }), 400
 
         points = get_history_data(
             tag_name=tag_name,
-            days=2
+            days=2,
         )
 
         logger.info(
-            "History data loaded for '%s' (%d point(s))",
+            "History data loaded for '%s' "
+            "(%d point(s))",
             tag_name,
-            len(points)
+            len(points),
         )
 
         return jsonify({
             "ok": True,
             "tag_name": tag_name,
-            "points": points
+            "points": points,
         })
 
     except Exception:
@@ -176,7 +192,7 @@ def api_history_data():
             "ok": False,
             "message": (
                 "Failed to load history data"
-            )
+            ),
         }), 500
 
 
@@ -193,34 +209,34 @@ def api_history_run(run_id):
         if detail is None:
             logger.info(
                 "History run %s not found",
-                run_id
+                run_id,
             )
 
             return jsonify({
                 "ok": False,
-                "message": "Run not found"
-            })
+                "message": "Run not found",
+            }), 404
 
         logger.info(
             "History run %s loaded",
-            run_id
+            run_id,
         )
 
         return jsonify({
             "ok": True,
             "run": detail["run"],
-            "values": detail["values"]
+            "values": detail["values"],
         })
 
     except Exception:
         logger.exception(
             "Failed to load history run %s",
-            run_id
+            run_id,
         )
 
         return jsonify({
             "ok": False,
             "message": (
                 "Failed to load history run"
-            )
+            ),
         }), 500
