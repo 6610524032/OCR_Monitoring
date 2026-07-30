@@ -6,6 +6,9 @@ let historyPoints = [];
 let selectedVariable = null;
 let selectedUnit = "";
 
+const HISTORY_RANGE_MS =
+    48 * 60 * 60 * 1000;
+
 const variableSelect =
     document.getElementById("variableSelect");
 
@@ -445,6 +448,36 @@ variableSelect.addEventListener(
     }
 );
 
+/* =====================================================
+   PARSE HISTORY TIMESTAMP
+===================================================== */
+function parseHistoryTimestamp(
+    value
+) {
+    const text =
+        String(value ?? "").trim();
+
+    if (!text) {
+        return null;
+    }
+
+    const normalizedText =
+        text.includes("T")
+            ? text
+            : text.replace(
+                " ",
+                "T"
+            );
+
+    const timestamp =
+        Date.parse(normalizedText);
+
+    if (Number.isNaN(timestamp)) {
+        return null;
+    }
+
+    return timestamp;
+}
 
 /* =====================================================
    LOAD HISTORY DATA
@@ -485,11 +518,36 @@ async function loadHistoryData() {
             return;
         }
 
-        historyPoints =
+        const now =
+            Date.now();
+        
+        const startTime =
+            now - HISTORY_RANGE_MS;
+
+        const points =
             Array.isArray(result.points)
                 ? result.points
                 : [];
 
+        historyPoints =
+            points.filter(
+                function (point) {
+                    const timestamp =
+                        parseHistoryTimestamp(
+                            point.ocr_time
+                        );
+
+                        if (timestamp === null) {
+                            return false;
+                        }
+
+                    return (
+                        timestamp >= startTime &&
+                        timestamp <= now
+                    );
+                }
+            );
+               
         drawChart();
 
     } catch (error) {
@@ -540,7 +598,7 @@ function drawChart() {
             "block";
 
         chartStatus.innerText =
-            "No numeric data found for " +
+            "No numeric data found in the last 48 hours for " +
             selectedVariable;
 
         return;
