@@ -23,6 +23,11 @@ DEFAULT_TIMEOUT = (
 MAX_ERROR_MESSAGE_LENGTH = 300
 
 
+QUIET_SUCCESS_PATHS = {
+    "/api/worker/outbound-queue/claim",
+}
+
+
 class ApiClientError(RuntimeError):
     """
     Raised when the API server cannot
@@ -46,6 +51,28 @@ def build_headers():
             "application/json"
         ),
     }
+
+
+def log_request_success(
+    method,
+    api_path,
+    status_code,
+):
+    log_method = (
+        logger.debug
+        if api_path in QUIET_SUCCESS_PATHS
+        else logger.info
+    )
+
+    log_method(
+        (
+            "%s %s succeeded: "
+            "status=%s"
+        ),
+        method,
+        api_path,
+        status_code,
+    )
 
 
 def get_response_error_message(
@@ -190,14 +217,10 @@ def send_api_request(
 
         # ใช้ DEBUG แทน INFO เพื่อไม่ให้
         # Queue polling ทุก 5 วินาทีทำให้ Log โตเร็ว
-        logger.debug(
-            (
-                "%s %s succeeded: "
-                "status=%s"
-            ),
-            method,
-            api_path,
-            response.status_code,
+        log_request_success(
+            method=method,
+            api_path=api_path,
+            status_code=response.status_code,
         )
 
         return result
