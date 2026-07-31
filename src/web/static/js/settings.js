@@ -14,7 +14,9 @@ let manualBoxes =
     savedRois.map(
         function (roi) {
             return {
-                id: roi.id,
+                id:
+                    roi.id ??
+                    createClientBoxId(),
 
                 x1: Number(
                     roi.x1 ??
@@ -60,6 +62,24 @@ let manualBoxes =
                 status: "done"
             };
         }
+    )
+    .filter(
+        function (box) {
+            return (
+                [
+                    box.x1,
+                    box.y1,
+                    box.x2,
+                    box.y2
+                ].every(
+                    Number.isFinite
+                ) &&
+                box.x1 >= 0 &&
+                box.y1 >= 0 &&
+                box.x2 > box.x1 &&
+                box.y2 > box.y1
+            );
+        }
     );
 
 let tagsDirty = false;
@@ -82,6 +102,372 @@ let drawCtx = null;
 const roiImage = document.getElementById("roiImage");
 const roiCanvas = document.getElementById("roiCanvas");
 let roiCtx = null;
+
+
+/* =====================================================
+   REQUEST HELPERS
+===================================================== */
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+const LONG_REQUEST_TIMEOUT_MS = 70000;
+const POLL_REQUEST_TIMEOUT_MS = 10000;
+const IMAGE_LOAD_TIMEOUT_MS = 15000;
+
+const MANUAL_OCR_RETRY_DELAY_MS = 2000;
+const MANUAL_OCR_RETRY_LIMIT = 15;
+
+let ocrStatusRequestInFlight = false;
+let rawImageRequestInFlight = false;
+let calibratedImageRequestInFlight = false;
+let resetConfigurationInFlight = false;
+let cameraRequestInFlight = false;
+
+
+class SettingsRequestError extends Error {
+    constructor(
+        message,
+        status = 0,
+        payload = null
+    ) {
+        super(message);
+
+        this.name = "SettingsRequestError";
+        this.status = status;
+        this.payload = payload;
+    }
+}
+
+
+function getPageCsrfToken() {
+    const metaToken =
+        document.querySelector(
+            'meta[name="csrf-token"]'
+        );
+
+    if (
+        metaToken &&
+        typeof metaToken.content === "string" &&
+        metaToken.content
+    ) {
+        return metaToken.content;
+    }
+
+    const inputToken =
+        document.querySelector(
+            'input[name="csrf_token"]'
+        );
+
+    if (
+        inputToken &&
+        typeof inputToken.value === "string" &&
+        inputToken.value
+    ) {
+        return inputToken.value;
+    }
+
+    if (
+        typeof window.CSRF_TOKEN === "string" &&
+        window.CSRF_TOKEN
+    ) {
+        return window.CSRF_TOKEN;
+    }
+
+    return "";
+}
+
+
+function redirectToLogin() {
+    const nextPath =
+        window.location.pathname +
+        window.location.search;
+
+    window.location.assign(
+        "/login?next=" +
+        encodeURIComponent(nextPath)
+    );
+}
+
+
+async function requestJson(
+    url,
+    options = {}
+) {
+    const controller =
+        new AbortController();
+
+    const timeoutMs =
+        Number.isFinite(options.timeoutMs)
+            ? Math.max(
+                1000,
+                options.timeoutMs
+            )
+            : DEFAULT_REQUEST_TIMEOUT_MS;
+
+    const timeoutId = window.setTimeout(
+        function () {
+            controller.abort();
+        },
+        timeoutMs
+    );
+
+    const method =
+        String(
+            options.method || "GET"
+        ).toUpperCase();
+
+    const headers = {
+        Accept: "application/json",
+        ...(options.headers || {})
+    };
+
+    const fetchOptions = {
+        method,
+        headers,
+        cache:
+            options.cache ||
+            "no-store",
+        credentials: "same-origin",
+        signal: controller.signal
+    };
+
+    if (
+        Object.prototype.hasOwnProperty.call(
+            options,
+            "json"
+        )
+    ) {
+        headers["Content-Type"] =
+            "application/json";
+
+        fetchOptions.body = JSON.stringify(
+            options.json
+        );
+    } else if (
+        Object.prototype.hasOwnProperty.call(
+            options,
+            "body"
+        )
+    ) {
+        fetchOptions.body =
+            options.body;
+    }
+
+    if (
+        !["GET", "HEAD", "OPTIONS"].includes(
+            method
+        )
+    ) {
+        const csrfToken =
+            getPageCsrfToken();
+
+        if (csrfToken) {
+            headers["X-CSRF-Token"] =
+                csrfToken;
+        }
+    }
+
+    try {
+        const response = await fetch(
+            url,
+            fetchOptions
+        );
+
+        const responseText =
+            await response.text();
+
+        let result = {};
+
+        if (responseText.trim()) {
+            try {
+                result = JSON.parse(
+                    responseText
+                );
+            } catch (_error) {
+                throw new SettingsRequestError(
+                    "Server returned an invalid JSON response.",
+                    response.status,
+                    null
+                );
+            }
+        }
+
+        if (
+            !result ||
+            typeof result !== "object" ||
+            Array.isArray(result)
+        ) {
+            throw new SettingsRequestError(
+                "Server response must be a JSON object.",
+                response.status,
+                null
+            );
+        }
+
+        if (
+            response.status === 401 &&
+            result.login_required
+        ) {
+            redirectToLogin();
+
+            throw new SettingsRequestError(
+                "Login session has expired.",
+                401,
+                result
+            );
+        }
+
+        if (!response.ok) {
+            throw new SettingsRequestError(
+                result.message ||
+                (
+                    "Request failed with HTTP " +
+                    response.status
+                ),
+                response.status,
+                result
+            );
+        }
+
+        return result;
+
+    } catch (error) {
+        if (
+            error &&
+            error.name === "AbortError"
+        ) {
+            throw new SettingsRequestError(
+                "Request timed out. Please try again.",
+                0,
+                null
+            );
+        }
+
+        throw error;
+
+    } finally {
+        window.clearTimeout(
+            timeoutId
+        );
+    }
+}
+
+
+function wait(milliseconds) {
+    return new Promise(function (resolve) {
+        window.setTimeout(
+            resolve,
+            milliseconds
+        );
+    });
+}
+
+
+function appendCacheBuster(url) {
+    const separator =
+        String(url).includes("?")
+            ? "&"
+            : "?";
+
+    return (
+        String(url) +
+        separator +
+        "t=" +
+        Date.now()
+    );
+}
+
+
+function loadImageElement(
+    image,
+    imageUrl,
+    errorMessage
+) {
+    return new Promise(function (
+        resolve,
+        reject
+    ) {
+        if (!image) {
+            reject(
+                new Error(
+                    errorMessage ||
+                    "Image element is missing."
+                )
+            );
+
+            return;
+        }
+
+        let settled = false;
+
+        const cleanup = function () {
+            image.removeEventListener(
+                "load",
+                handleLoad
+            );
+
+            image.removeEventListener(
+                "error",
+                handleError
+            );
+
+            window.clearTimeout(
+                timeoutId
+            );
+        };
+
+        const handleLoad = function () {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            cleanup();
+            resolve(true);
+        };
+
+        const handleError = function () {
+            if (settled) {
+                return;
+            }
+
+            settled = true;
+            cleanup();
+
+            reject(
+                new Error(
+                    errorMessage ||
+                    "Cannot load image."
+                )
+            );
+        };
+
+        const timeoutId = window.setTimeout(
+            handleError,
+            IMAGE_LOAD_TIMEOUT_MS
+        );
+
+        image.addEventListener(
+            "load",
+            handleLoad,
+            {
+                once: true
+            }
+        );
+
+        image.addEventListener(
+            "error",
+            handleError,
+            {
+                once: true
+            }
+        );
+
+        image.src =
+            appendCacheBuster(
+                imageUrl
+            );
+    });
+}
 
 
 /* =====================================================
@@ -120,6 +506,15 @@ function setupCanvasForImage(image, canvas) {
 
     canvas.style.left = image.offsetLeft + "px";
     canvas.style.top = image.offsetTop + "px";
+
+    /*
+    Canvas ใช้สำหรับวาดภาพทับเท่านั้น
+    ให้ Pointer Event ผ่านไปยังรูปด้านล่างเสมอ
+    */
+    canvas.style.pointerEvents = "none";
+
+    image.style.userSelect = "none";
+    image.draggable = false;
 
     return canvas.getContext("2d");
 }
@@ -317,32 +712,245 @@ if (hmiImage) {
 
 
 function sortCorners(points) {
-    const pts = [...points];
+    if (
+        !Array.isArray(points) ||
+        points.length !== 4
+    ) {
+        return Array.isArray(points)
+            ? [...points]
+            : [];
+    }
 
-    const sortedByY = [...pts].sort(
-        function (a, b) {
-            return a.realY - b.realY;
+    const center = points.reduce(
+        function (accumulator, point) {
+            accumulator.x +=
+                point.realX;
+
+            accumulator.y +=
+                point.realY;
+
+            return accumulator;
+        },
+        {
+            x: 0,
+            y: 0
         }
     );
 
-    const top = sortedByY
-        .slice(0, 2)
-        .sort(function (a, b) {
-            return a.realX - b.realX;
-        });
+    center.x /= points.length;
+    center.y /= points.length;
 
-    const bottom = sortedByY
-        .slice(2, 4)
-        .sort(function (a, b) {
-            return a.realX - b.realX;
-        });
+    let ordered = [...points].sort(
+        function (a, b) {
+            const angleA =
+                Math.atan2(
+                    a.realY - center.y,
+                    a.realX - center.x
+                );
 
-    return [
-        top[0],
-        top[1],
-        bottom[1],
-        bottom[0]
+            const angleB =
+                Math.atan2(
+                    b.realY - center.y,
+                    b.realX - center.x
+                );
+
+            return angleA - angleB;
+        }
+    );
+
+    let topLeftIndex = 0;
+    let smallestSum = Infinity;
+
+    ordered.forEach(
+        function (point, index) {
+            const coordinateSum =
+                point.realX +
+                point.realY;
+
+            if (
+                coordinateSum <
+                smallestSum
+            ) {
+                smallestSum =
+                    coordinateSum;
+
+                topLeftIndex = index;
+            }
+        }
+    );
+
+    ordered = [
+        ...ordered.slice(
+            topLeftIndex
+        ),
+        ...ordered.slice(
+            0,
+            topLeftIndex
+        )
     ];
+
+    const signedArea =
+        ordered.reduce(
+            function (
+                area,
+                point,
+                index
+            ) {
+                const next =
+                    ordered[
+                        (
+                            index + 1
+                        ) %
+                        ordered.length
+                    ];
+
+                return (
+                    area +
+                    point.realX *
+                        next.realY -
+                    next.realX *
+                        point.realY
+                );
+            },
+            0
+        );
+
+    /*
+    พิกัดภาพมีแกน Y ลงด้านล่าง
+    ลำดับ TL → TR → BR → BL
+    จะมี signed area เป็นบวก
+    */
+    if (signedArea < 0) {
+        ordered = [
+            ordered[0],
+            ...ordered
+                .slice(1)
+                .reverse()
+        ];
+    }
+
+    return ordered;
+}
+
+
+function validateCalibrationPoints(
+    points,
+    image
+) {
+    if (
+        !Array.isArray(points) ||
+        points.length !== 4
+    ) {
+        return (
+            "กรุณาเลือกจุด Calibration " +
+            "ให้ครบ 4 จุด"
+        );
+    }
+
+    if (
+        !image ||
+        image.naturalWidth <= 0 ||
+        image.naturalHeight <= 0
+    ) {
+        return (
+            "ไม่สามารถตรวจสอบขนาดภาพ " +
+            "Calibration ได้"
+        );
+    }
+
+    for (const point of points) {
+        if (
+            !Number.isFinite(
+                point.realX
+            ) ||
+            !Number.isFinite(
+                point.realY
+            ) ||
+            point.realX < 0 ||
+            point.realY < 0 ||
+            point.realX >=
+                image.naturalWidth ||
+            point.realY >=
+                image.naturalHeight
+        ) {
+            return (
+                "พบพิกัด Calibration " +
+                "ที่อยู่นอกขอบภาพ"
+            );
+        }
+    }
+
+    for (
+        let firstIndex = 0;
+        firstIndex < points.length;
+        firstIndex++
+    ) {
+        for (
+            let secondIndex =
+                firstIndex + 1;
+            secondIndex < points.length;
+            secondIndex++
+        ) {
+            const deltaX =
+                points[firstIndex].realX -
+                points[secondIndex].realX;
+
+            const deltaY =
+                points[firstIndex].realY -
+                points[secondIndex].realY;
+
+            if (
+                Math.hypot(
+                    deltaX,
+                    deltaY
+                ) < 5
+            ) {
+                return (
+                    "จุด Calibration " +
+                    "อยู่ใกล้กันเกินไป"
+                );
+            }
+        }
+    }
+
+    const doubledArea =
+        points.reduce(
+            function (
+                area,
+                point,
+                index
+            ) {
+                const next =
+                    points[
+                        (
+                            index + 1
+                        ) %
+                        points.length
+                    ];
+
+                return (
+                    area +
+                    point.realX *
+                        next.realY -
+                    next.realX *
+                        point.realY
+                );
+            },
+            0
+        );
+
+    if (
+        Math.abs(
+            doubledArea
+        ) < 200
+    ) {
+        return (
+            "พื้นที่ Calibration เล็กเกินไป " +
+            "หรือจุดเกือบอยู่ในแนวเดียวกัน"
+        );
+    }
+
+    return "";
 }
 
 
@@ -482,9 +1090,42 @@ function drawCalibrationPoints() {
     }
 }
 
+/* =====================================================
+   CLIENT BOX ID
+===================================================== */
+
+function createClientBoxId() {
+    if (
+        typeof crypto !== "undefined" &&
+        typeof crypto.randomUUID ===
+            "function"
+    ) {
+        return (
+            "client_" +
+            crypto.randomUUID()
+        );
+    }
+
+    return (
+        "client_" +
+        Date.now() +
+        "_" +
+        Math.random()
+            .toString(36)
+            .slice(2)
+    );
+}
+
+
+/* =====================================================
+   RESET CALIBRATION POINTS
+===================================================== */
 
 const resetBtn =
-    document.getElementById("resetBtn");
+    document.getElementById(
+        "resetBtn"
+    );
+
 
 if (resetBtn) {
     resetBtn.addEventListener(
@@ -495,7 +1136,10 @@ if (resetBtn) {
 
             updatePointText();
 
-            if (drawCtx && drawCanvas) {
+            if (
+                drawCtx &&
+                drawCanvas
+            ) {
                 drawCtx.clearRect(
                     0,
                     0,
@@ -507,17 +1151,32 @@ if (resetBtn) {
     );
 }
 
+
+/* =====================================================
+   SAVE CALIBRATION
+===================================================== */
+
 const saveBtn =
-    document.getElementById("saveBtn");
+    document.getElementById(
+        "saveBtn"
+    );
+
 
 if (saveBtn) {
     saveBtn.addEventListener(
         "click",
         async function () {
-            if (sortedPoints.length !== 4) {
-                alert(
-                    "กรุณาเลือกจุด Calibration ให้ครบ 4 จุด"
+            const validationMessage =
+                validateCalibrationPoints(
+                    sortedPoints,
+                    hmiImage
                 );
+
+            if (validationMessage) {
+                alert(
+                    validationMessage
+                );
+
                 return;
             }
 
@@ -525,105 +1184,122 @@ if (saveBtn) {
                 alert(
                     "ไม่พบภาพสำหรับ Calibration"
                 );
+
                 return;
             }
 
             const imageName =
-                hmiImage.dataset.currentImage;
+                String(
+                    hmiImage.dataset
+                        .currentImage ||
+                    ""
+                ).trim();
 
             if (!imageName) {
                 alert(
                     "ไม่พบชื่อภาพสำหรับ Calibration"
                 );
+
                 return;
             }
 
             const originalText =
                 saveBtn.innerText;
 
-            saveBtn.disabled = true;
+            saveBtn.disabled =
+                true;
+
             saveBtn.innerText =
                 "Saving...";
 
             const payload = {
                 image_path: imageName,
-                points: sortedPoints.map(
-                    function (point) {
-                        return {
-                            x: point.realX,
-                            y: point.realY
-                        };
-                    }
-                )
+
+                points:
+                    sortedPoints.map(
+                        function (point) {
+                            return {
+                                x:
+                                    point.realX,
+
+                                y:
+                                    point.realY
+                            };
+                        }
+                    )
             };
 
             try {
-                const response =
-                    await fetch(
+                const result =
+                    await requestJson(
                         "/web_api/api/save_calibration",
                         {
                             method: "POST",
-                            headers: {
-                                "Content-Type":
-                                    "application/json"
-                            },
-                            body: JSON.stringify(
-                                payload
-                            )
+
+                            json: payload,
+
+                            timeoutMs:
+                                LONG_REQUEST_TIMEOUT_MS
                         }
                     );
 
-                const result =
-                    await response.json();
-
-                if (!response.ok || !result.ok) {
+                if (!result.ok) {
                     throw new Error(
                         result.message ||
                         "Save calibration failed."
                     );
                 }
 
-                const previewResponse =
-                await fetch(
-                    "/web_api/api/test_calibration",
-                    {
-                        method: "POST"
-                    }
-                );
+                saveBtn.innerText =
+                    "Creating preview...";
 
                 const previewResult =
-                    await previewResponse.json();
+                    await requestJson(
+                        "/web_api/api/test_calibration",
+                        {
+                            method: "POST",
 
-                if (
-                    !previewResponse.ok ||
-                    !previewResult.ok
-                ) {
-                        throw new Error(
-                            previewResult.message ||
-                            "Cannot create calibration preview."
-                        );
+                            json: {},
+
+                            timeoutMs:
+                                LONG_REQUEST_TIMEOUT_MS
+                        }
+                    );
+
+                if (!previewResult.ok) {
+                    throw new Error(
+                        previewResult.message ||
+                        "Cannot create calibration preview."
+                    );
                 }
+
+                saveBtn.innerText =
+                    "Loading preview...";
 
                 const refreshed =
                     await checkLatestCalibratedImage(
                         true
-
                     );
 
                 if (!refreshed) {
                     throw new Error(
-                        "Calibration saved, but the Manual ROI image could not be loaded."
+                        (
+                            "Calibration was saved, " +
+                            "but the calibrated image " +
+                            "could not be loaded."
+                        )
                     );
                 }
-
-                alert(
-                    "Save Calibration สำเร็จ"
-                );
 
                 rawPoints = [];
                 sortedPoints = [];
 
                 updatePointText();
+                drawCalibrationPoints();
+
+                alert(
+                    "Save Calibration สำเร็จ"
+                );
 
             } catch (error) {
                 console.error(
@@ -647,141 +1323,174 @@ if (saveBtn) {
     );
 }
 
+
+/* =====================================================
+   CAPTURE IMAGE
+===================================================== */
+
 const captureImageBtn =
     document.getElementById(
         "captureImageBtn"
     );
 
 
-function wait(milliseconds) {
-    return new Promise(function (resolve) {
-        setTimeout(resolve, milliseconds);
-    });
-}
-
-
-function loadRawImageImmediately(
+async function loadRawImageImmediately(
     imageUrl,
     imageName
 ) {
-    return new Promise(function (
-        resolve,
-        reject
-    ) {
-        if (!hmiImage) {
-            reject(
-                new Error(
-                    "Calibration image element missing."
-                )
-            );
-            return;
-        }
+    if (!hmiImage) {
+        throw new Error(
+            (
+                "Calibration image " +
+                "element is missing."
+            )
+        );
+    }
 
-        hmiImage.onload = function () {
+    const normalizedImageUrl =
+        String(
+            imageUrl || ""
+        ).trim();
 
-            const rawImageContainer =
-                document.getElementById(
-                    "rawImageContainer"
-                );
+    const normalizedImageName =
+        String(
+            imageName || ""
+        ).trim();
 
-            const imagePathRow =
-                document.getElementById(
-                    "imagePathRow"
-                );
+    if (!normalizedImageUrl) {
+        throw new Error(
+            "Captured image URL is missing."
+        );
+    }
 
-            if (rawImageContainer) {
-                rawImageContainer.style.display = "";
-            }
+    if (!normalizedImageName) {
+        throw new Error(
+            "Captured image name is missing."
+        );
+    }
 
-            if (imagePathRow) {
-                imagePathRow.style.display = "";
-            }
+    await loadImageElement(
+        hmiImage,
+        normalizedImageUrl,
+        "Cannot load captured image."
+    );
 
-            hmiImage.style.display = "";
+    hmiImage.dataset.currentImage =
+        normalizedImageName;
 
-            drawCtx =
-                setupCanvasForImage(
-                    hmiImage,
-                    drawCanvas
-                );
+    const rawImageContainer =
+        document.getElementById(
+            "rawImageContainer"
+        );
 
-            drawCalibrationPoints();
+    const imagePathRow =
+        document.getElementById(
+            "imagePathRow"
+        );
 
-            resolve(true);
-        };
+    const imagePathElement =
+        document.getElementById(
+            "imagePath"
+        );
 
-        hmiImage.onerror = function () {
-            reject(
-                new Error(
-                    "Cannot load captured image."
-                )
-            );
-        };
+    if (rawImageContainer) {
+        rawImageContainer.style.display =
+            "";
+    }
 
-        hmiImage.dataset.currentImage =
-            imageName;
+    if (imagePathRow) {
+        imagePathRow.style.display =
+            "";
+    }
 
-        const separator =
-            imageUrl.includes("?")
-                ? "&"
-                : "?";
+    if (imagePathElement) {
+        imagePathElement.innerText =
+            normalizedImageName;
+    }
 
-        hmiImage.src =
-            imageUrl +
-            separator +
-            "t=" +
-            Date.now();
-    });
+    hmiImage.style.display =
+        "";
+
+    drawCtx =
+        setupCanvasForImage(
+            hmiImage,
+            drawCanvas
+        );
+
+    drawCalibrationPoints();
+
+    return true;
 }
 
 
 async function refreshCapturedImage(
     expectedImage
 ) {
+    const normalizedExpectedImage =
+        String(
+            expectedImage || ""
+        ).trim();
+
+    if (!normalizedExpectedImage) {
+        return false;
+    }
+
     const maximumAttempts = 20;
+    let lastError = null;
 
     for (
         let attempt = 0;
         attempt < maximumAttempts;
         attempt++
     ) {
-        const response = await fetch(
-            "/web_api/api/latest_raw_image" +
-            "?t=" +
-            Date.now(),
-            {
-                cache: "no-store"
-            }
-        );
-
-        const result =
-            await response.json();
-
-        if (
-            result.ok &&
-            result.image &&
-            result.image_url &&
-            result.image === expectedImage
-        ) {
-            await loadRawImageImmediately(
-                result.image_url,
-                result.image
-            );
-
-            const imagePathElement =
-                document.getElementById(
-                    "imagePath"
+        try {
+            const result =
+                await requestJson(
+                    (
+                        "/web_api/api/latest_raw_image" +
+                        "?t=" +
+                        Date.now()
+                    ),
+                    {
+                        timeoutMs:
+                            POLL_REQUEST_TIMEOUT_MS
+                    }
                 );
 
-            if (imagePathElement) {
-                imagePathElement.innerText =
-                    result.image;
+            if (
+                result.ok &&
+                result.image &&
+                result.image_url &&
+                String(
+                    result.image
+                ) ===
+                    normalizedExpectedImage
+            ) {
+                await loadRawImageImmediately(
+                    result.image_url,
+                    result.image
+                );
+
+                return true;
             }
 
-            return true;
+        } catch (error) {
+            lastError = error;
         }
 
-        await wait(250);
+        await wait(
+            250
+        );
+    }
+
+    if (lastError) {
+        console.error(
+            (
+                "Cannot refresh the " +
+                "captured image:"
+            ),
+            lastError
+        );
     }
 
     return false;
@@ -795,40 +1504,58 @@ if (captureImageBtn) {
             const originalText =
                 captureImageBtn.innerText;
 
-            captureImageBtn.disabled = true;
+            captureImageBtn.disabled =
+                true;
+
             captureImageBtn.innerText =
                 "Capturing...";
 
             try {
-                const response =
-                    await fetch(
+                const result =
+                    await requestJson(
                         "/web_api/api/capture_image",
                         {
-                            method: "POST"
+                            method: "POST",
+
+                            json: {},
+
+                            timeoutMs:
+                                LONG_REQUEST_TIMEOUT_MS
                         }
                     );
 
-                const result =
-                    await response.json();
-
                 if (!result.ok) {
-                    alert(
+                    throw new Error(
                         result.message ||
                         "Capture failed."
                     );
+                }
 
-                    return;
+                if (
+                    !result.image ||
+                    !result.image_url
+                ) {
+                    throw new Error(
+                        (
+                            "Capture response does not " +
+                            "contain image information."
+                        )
+                    );
                 }
 
                 /*
-                ล้างจุด Calibration เดิม เพราะเป็นภาพใหม่
+                ภาพใหม่ต้องไม่ใช้จุด
+                Calibration ของภาพเดิม
                 */
                 rawPoints = [];
                 sortedPoints = [];
 
                 updatePointText();
 
-                if (drawCtx && drawCanvas) {
+                if (
+                    drawCtx &&
+                    drawCanvas
+                ) {
                     drawCtx.clearRect(
                         0,
                         0,
@@ -840,33 +1567,23 @@ if (captureImageBtn) {
                 captureImageBtn.innerText =
                     "Loading image...";
 
-                if (
-                    !result.image ||
-                    !result.image_url
-                ) {
-                    throw new Error(
-                        "Capture response does not contain image information."
-                    );
-                }
-
-                await loadRawImageImmediately(
-                    result.image_url,
-                    result.image
-                );
-
-                const imagePathElement =
-                    document.getElementById(
-                        "imagePath"
+                try {
+                    await loadRawImageImmediately(
+                        result.image_url,
+                        result.image
                     );
 
-                if (imagePathElement) {
-                    imagePathElement.innerText =
-                        result.image;
+                } catch (imageError) {
+                    const refreshed =
+                        await refreshCapturedImage(
+                            result.image
+                        );
+
+                    if (!refreshed) {
+                        throw imageError;
+                    }
                 }
 
-                /*
-                กล่อง OK จะแสดงหลังรูปใหม่โหลดเสร็จแล้ว
-                */
                 alert(
                     "Image captured successfully."
                 );
@@ -879,11 +1596,16 @@ if (captureImageBtn) {
 
                 alert(
                     error.message ||
-                    "Cannot capture or load image."
+                    (
+                        "Cannot capture or " +
+                        "load image."
+                    )
                 );
 
             } finally {
-                captureImageBtn.disabled = false;
+                captureImageBtn.disabled =
+                    false;
+
                 captureImageBtn.innerText =
                     originalText;
             }
@@ -897,46 +1619,98 @@ if (captureImageBtn) {
 ===================================================== */
 
 const resetAllBtn =
-    document.getElementById("resetAllBtn");
+    document.getElementById(
+        "resetAllBtn"
+    );
+
 
 if (resetAllBtn) {
     resetAllBtn.addEventListener(
         "click",
         async function () {
-            const ok = confirm(
-                "ต้องการล้าง Calibration และ User Tags ทั้งหมดใช่ไหม?"
-            );
-
-            if (!ok) {
+            if (
+                resetConfigurationInFlight
+            ) {
                 return;
             }
 
-            try {
-                const response = await fetch(
-                    "/web_api/api/reset_configuration",
-                    {
-                        method: "POST"
-                    }
+            const confirmed =
+                window.confirm(
+                    (
+                        "ต้องการล้างค่ากล้อง " +
+                        "ปิด Calibration และปิด " +
+                        "User Tags ทั้งหมดใช่ไหม?\n\n" +
+                        "ประวัติ OCR จะยังคงอยู่"
+                    )
                 );
 
-                const result =
-                    await response.json();
+            if (!confirmed) {
+                return;
+            }
 
-                if (result.ok) {
-                    alert(
-                        "Reset configuration complete"
+            const originalText =
+                resetAllBtn.innerText;
+
+            resetConfigurationInFlight =
+                true;
+
+            resetAllBtn.disabled =
+                true;
+
+            resetAllBtn.innerText =
+                "Resetting...";
+
+            try {
+                const result =
+                    await requestJson(
+                        "/web_api/api/reset_configuration",
+                        {
+                            method: "POST",
+
+                            json: {},
+
+                            timeoutMs:
+                                LONG_REQUEST_TIMEOUT_MS
+                        }
                     );
 
-                    location.reload();
-                } else {
-                    alert(
+                if (!result.ok) {
+                    throw new Error(
                         result.message ||
-                        "Reset failed"
+                        "Reset failed."
                     );
                 }
+
+                tagsDirty = false;
+                tagsSaving = false;
+
+                alert(
+                    result.message ||
+                    "Reset configuration complete."
+                );
+
+                window.location.reload();
+
             } catch (error) {
-                console.error(error);
-                alert("Reset failed");
+                console.error(
+                    "Reset configuration error:",
+                    error
+                );
+
+                alert(
+                    error.message ||
+                    "Reset failed."
+                );
+
+            } finally {
+                resetConfigurationInFlight =
+                    false;
+
+                resetAllBtn.disabled =
+                    false;
+
+                resetAllBtn.innerText =
+                    originalText;
             }
         }
     );
@@ -965,7 +1739,9 @@ function disableRoiDrawing() {
         );
 
     if (drawButton) {
-        drawButton.disabled = true;
+        drawButton.disabled =
+            true;
+
         drawButton.classList.remove(
             "active"
         );
@@ -995,8 +1771,11 @@ function enableRoiDrawing() {
         );
 
     if (drawButton) {
-        drawButton.disabled = false;
-        drawButton.title = "";
+        drawButton.disabled =
+            false;
+
+        drawButton.title =
+            "";
     }
 }
 
@@ -1045,9 +1824,16 @@ function updateOcrStatusCard(
     }
 
     const normalizedStatus =
-        String(status || "")
+        String(
+            status || ""
+        )
             .trim()
             .toUpperCase();
+
+    const normalizedMessage =
+        String(
+            message || ""
+        ).trim();
 
     card.classList.remove(
         "ocr-status-loading",
@@ -1056,18 +1842,24 @@ function updateOcrStatusCard(
     );
 
     if (spinner) {
-        spinner.style.display = "none";
+        spinner.style.display =
+            "none";
     }
 
     if (readyIcon) {
-        readyIcon.style.display = "none";
+        readyIcon.style.display =
+            "none";
     }
 
     if (errorIcon) {
-        errorIcon.style.display = "none";
+        errorIcon.style.display =
+            "none";
     }
 
-    if (normalizedStatus === "READY") {
+    if (
+        normalizedStatus ===
+        "READY"
+    ) {
         card.classList.add(
             "ocr-status-ready"
         );
@@ -1084,20 +1876,27 @@ function updateOcrStatusCard(
 
         if (description) {
             description.innerText =
-                "ระบบพร้อมใช้งานแล้ว สามารถเริ่มวาด Manual ROI ได้";
+                (
+                    "ระบบพร้อมใช้งานแล้ว " +
+                    "สามารถเริ่มวาด Manual ROI ได้"
+                );
         }
 
         if (statusMessage) {
             statusMessage.innerText =
-                message ||
+                normalizedMessage ||
                 "OCR model is ready.";
         }
 
         enableRoiDrawing();
+
         return;
     }
 
-    if (normalizedStatus === "ERROR") {
+    if (
+        normalizedStatus ===
+        "ERROR"
+    ) {
         card.classList.add(
             "ocr-status-error"
         );
@@ -1114,16 +1913,20 @@ function updateOcrStatusCard(
 
         if (description) {
             description.innerText =
-                "ไม่สามารถเตรียมโมเดล OCR ได้ กรุณาตรวจสอบข้อความผิดพลาด";
+                (
+                    "ไม่สามารถเตรียมโมเดล OCR ได้ " +
+                    "กรุณาตรวจสอบข้อความผิดพลาด"
+                );
         }
 
         if (statusMessage) {
             statusMessage.innerText =
-                message ||
+                normalizedMessage ||
                 "Cannot prepare OCR model.";
         }
 
         disableRoiDrawing();
+
         return;
     }
 
@@ -1132,7 +1935,8 @@ function updateOcrStatusCard(
     );
 
     if (spinner) {
-        spinner.style.display = "block";
+        spinner.style.display =
+            "block";
     }
 
     if (title) {
@@ -1142,12 +1946,14 @@ function updateOcrStatusCard(
         ) {
             title.innerText =
                 "Downloading OCR Model...";
+
         } else if (
             normalizedStatus ===
             "LOADING"
         ) {
             title.innerText =
                 "Loading OCR Model...";
+
         } else {
             title.innerText =
                 "Preparing OCR Model...";
@@ -1156,12 +1962,15 @@ function updateOcrStatusCard(
 
     if (description) {
         description.innerText =
-            "กรุณารอจนกว่าโมเดล OCR จะพร้อมใช้งาน ก่อนเริ่มวาด Manual ROI";
+            (
+                "กรุณารอจนกว่าโมเดล OCR " +
+                "จะพร้อมใช้งาน ก่อนเริ่มวาด Manual ROI"
+            );
     }
 
     if (statusMessage) {
         statusMessage.innerText =
-            message ||
+            normalizedMessage ||
             "Checking OCR model status...";
     }
 
@@ -1170,40 +1979,49 @@ function updateOcrStatusCard(
 
 
 async function checkOcrModelStatus() {
+    if (ocrStatusRequestInFlight) {
+        return;
+    }
+
+    ocrStatusRequestInFlight =
+        true;
+
     try {
-        const response = await fetch(
-            "/web_api/api/ocr/status?t=" +
-            Date.now(),
-            {
-                cache: "no-store"
-            }
-        );
-
         const result =
-            await response.json();
-
-        if (!response.ok) {
-            throw new Error(
-                result.message ||
-                "Cannot check OCR model status."
+            await requestJson(
+                (
+                    "/web_api/api/ocr/status" +
+                    "?t=" +
+                    Date.now()
+                ),
+                {
+                    timeoutMs:
+                        POLL_REQUEST_TIMEOUT_MS
+                }
             );
-        }
+
+        const status =
+            String(
+                result.status || ""
+            )
+                .trim()
+                .toUpperCase();
 
         updateOcrStatusCard(
-            result.status,
+            status,
             result.message
         );
 
         if (
-            String(result.status)
-                .toUpperCase() === "READY" &&
+            status === "READY" &&
             ocrStatusInterval
         ) {
-            clearInterval(
+            window.clearInterval(
                 ocrStatusInterval
             );
 
-            ocrStatusInterval = null;
+            ocrStatusInterval =
+                null;
         }
 
     } catch (error) {
@@ -1214,28 +2032,45 @@ async function checkOcrModelStatus() {
 
         updateOcrStatusCard(
             "ERROR",
-            error.message ||
-            "Cannot connect to OCR status service."
+            (
+                error.message ||
+                "Cannot connect to OCR status service."
+            )
         );
+
+    } finally {
+        ocrStatusRequestInFlight =
+            false;
+    }
+}
+
+
+function stopOcrStatusMonitoring() {
+    if (ocrStatusInterval) {
+        window.clearInterval(
+            ocrStatusInterval
+        );
+
+        ocrStatusInterval =
+            null;
     }
 }
 
 
 function startOcrStatusMonitoring() {
+    stopOcrStatusMonitoring();
+
     disableRoiDrawing();
 
     checkOcrModelStatus();
 
-    if (ocrStatusInterval) {
-        clearInterval(
-            ocrStatusInterval
+    ocrStatusInterval =
+        window.setInterval(
+            function () {
+                checkOcrModelStatus();
+            },
+            OCR_STATUS_CHECK_INTERVAL_MS
         );
-    }
-
-    ocrStatusInterval = setInterval(
-        checkOcrModelStatus,
-        OCR_STATUS_CHECK_INTERVAL_MS
-    );
 }
 
 
@@ -1243,150 +2078,271 @@ function startOcrStatusMonitoring() {
    ROI DRAWING
 ===================================================== */
 
-if (roiImage) {
-    roiImage.onload = function () {
-        roiCtx = setupCanvasForImage(
-            roiImage,
-            roiCanvas
-        );
+function configureRoiImageEvents() {
+    if (!roiImage) {
+        return;
+    }
 
-        drawRoiCanvas();
-    };
+    roiImage.draggable =
+        false;
+
+    roiImage.style.userSelect =
+        "none";
+
+    roiImage.style.touchAction =
+        "none";
+
+    roiImage.addEventListener(
+        "dragstart",
+        function (event) {
+            event.preventDefault();
+        }
+    );
+
+    roiImage.addEventListener(
+        "load",
+        function () {
+            roiCtx =
+                setupCanvasForImage(
+                    roiImage,
+                    roiCanvas
+                );
+
+            drawRoiCanvas();
+        }
+    );
 
     if (
         roiImage.complete &&
         roiImage.naturalWidth > 0
     ) {
-        roiCtx = setupCanvasForImage(
-            roiImage,
-            roiCanvas
-        );
+        roiCtx =
+            setupCanvasForImage(
+                roiImage,
+                roiCanvas
+            );
 
         drawRoiCanvas();
     }
 
     roiImage.addEventListener(
-        "mousedown",
-        function (event) {
-            if (
-                !isOcrModelReady ||
-                !drawMode
-            ) {
-                return;
-            }
-
-            event.preventDefault();
-
-            const point = getImagePoint(
-                event,
-                roiImage
-            );
-
-            if (!point) {
-                return;
-            }
-
-            isDrawingBox = true;
-            startPoint = point;
-            currentPoint = point;
-
-            drawRoiCanvas();
-        }
+        "pointerdown",
+        handleRoiPointerDown
     );
 
     roiImage.addEventListener(
-        "mousemove",
-        function (event) {
-            if (
-                !drawMode ||
-                !isDrawingBox
-            ) {
-                return;
-            }
-
-            const point = getImagePoint(
-                event,
-                roiImage
-            );
-
-            if (!point) {
-                return;
-            }
-
-            currentPoint = point;
-
-            drawRoiCanvas();
-            drawPreviewBox();
-        }
+        "pointermove",
+        handleRoiPointerMove
     );
 
     roiImage.addEventListener(
-        "mouseup",
-        function (event) {
-            if (
-                !drawMode ||
-                !isDrawingBox
-            ) {
-                return;
-            }
-
-            const point = getImagePoint(
-                event,
-                roiImage
-            );
-
-            if (!point) {
-                cancelCurrentBox();
-                return;
-            }
-
-            currentPoint = point;
-            finishBox();
-        }
+        "pointerup",
+        handleRoiPointerUp
     );
 
     roiImage.addEventListener(
-        "mouseleave",
-        function () {
-            if (
-                !drawMode ||
-                !isDrawingBox
-            ) {
-                return;
-            }
+        "pointercancel",
+        handleRoiPointerCancel
+    );
 
-            cancelCurrentBox();
-        }
+    roiImage.addEventListener(
+        "lostpointercapture",
+        handleRoiPointerCaptureLost
     );
 }
 
 
+function handleRoiPointerDown(
+    event
+) {
+    if (
+        !isOcrModelReady ||
+        !drawMode ||
+        isDrawingBox
+    ) {
+        return;
+    }
+
+    if (
+        typeof event.button ===
+            "number" &&
+        event.button !== 0
+    ) {
+        return;
+    }
+
+    const point =
+        getImagePoint(
+            event,
+            roiImage
+        );
+
+    if (!point) {
+        return;
+    }
+
+    event.preventDefault();
+
+    try {
+        roiImage.setPointerCapture(
+            event.pointerId
+        );
+
+    } catch (_error) {
+        /*
+        บาง Browser อาจไม่รองรับ
+        Pointer Capture เต็มรูปแบบ
+        */
+    }
+
+    isDrawingBox =
+        true;
+
+    startPoint =
+        point;
+
+    currentPoint =
+        point;
+
+    drawRoiCanvas();
+    drawPreviewBox();
+}
+
+
+function handleRoiPointerMove(
+    event
+) {
+    if (
+        !drawMode ||
+        !isDrawingBox
+    ) {
+        return;
+    }
+
+    const point =
+        getImagePoint(
+            event,
+            roiImage
+        );
+
+    if (!point) {
+        return;
+    }
+
+    event.preventDefault();
+
+    currentPoint =
+        point;
+
+    drawRoiCanvas();
+    drawPreviewBox();
+}
+
+
+function handleRoiPointerUp(
+    event
+) {
+    if (
+        !drawMode ||
+        !isDrawingBox
+    ) {
+        return;
+    }
+
+    const point =
+        getImagePoint(
+            event,
+            roiImage
+        );
+
+    if (!point) {
+        cancelCurrentBox();
+        return;
+    }
+
+    event.preventDefault();
+
+    currentPoint =
+        point;
+
+    try {
+        roiImage.releasePointerCapture(
+            event.pointerId
+        );
+
+    } catch (_error) {
+        /*
+        ไม่มี Pointer Capture
+        ให้ปล่อยผ่านได้
+        */
+    }
+
+    finishBox();
+}
+
+
+function handleRoiPointerCancel() {
+    if (!isDrawingBox) {
+        return;
+    }
+
+    cancelCurrentBox();
+}
+
+
+function handleRoiPointerCaptureLost() {
+    if (!isDrawingBox) {
+        return;
+    }
+
+    /*
+    หาก Pointer Capture หายก่อน Pointer Up
+    ให้ยกเลิกกล่องชั่วคราว ป้องกัน ROI ค้าง
+    */
+    cancelCurrentBox();
+}
+
+
 function cancelCurrentBox() {
-    isDrawingBox = false;
-    startPoint = null;
-    currentPoint = null;
+    isDrawingBox =
+        false;
+
+    startPoint =
+        null;
+
+    currentPoint =
+        null;
 
     drawRoiCanvas();
 }
 
 
 const drawRoiBtn =
-    document.getElementById("drawRoiBtn");
+    document.getElementById(
+        "drawRoiBtn"
+    );
+
 
 if (drawRoiBtn) {
-    drawRoiBtn.disabled = true;
+    drawRoiBtn.disabled =
+        true;
 
     drawRoiBtn.addEventListener(
         "click",
         function () {
             if (!isOcrModelReady) {
                 alert(
-                    "กรุณารอจนกว่าโมเดล OCR จะพร้อมใช้งาน"
+                    (
+                        "กรุณารอจนกว่าโมเดล OCR " +
+                        "จะพร้อมใช้งาน"
+                    )
                 );
-                return;
-             }
 
-            drawMode = !drawMode;
+                return;
+            }
+
+            drawMode =
+                !drawMode;
 
             const modeText =
                 document.getElementById(
@@ -1405,6 +2361,7 @@ if (drawRoiBtn) {
                     modeText.innerText =
                         "Draw Mode ON";
                 }
+
             } else {
                 drawRoiBtn.classList.remove(
                     "active"
@@ -1430,7 +2387,8 @@ function drawRoiCanvas() {
         !roiCtx ||
         !roiCanvas ||
         !roiImage ||
-        roiImage.naturalWidth <= 0
+        roiImage.naturalWidth <= 0 ||
+        roiImage.naturalHeight <= 0
     ) {
         return;
     }
@@ -1451,32 +2409,76 @@ function drawRoiCanvas() {
         roiImage.naturalHeight;
 
     manualBoxes.forEach(
-        function (box, index) {
-            const x = box.x1 * scaleX;
-            const y = box.y1 * scaleY;
+        function (
+            box,
+            index
+        ) {
+            const coordinates = [
+                box.x1,
+                box.y1,
+                box.x2,
+                box.y2
+            ].map(Number);
 
-            const w =
-                (box.x2 - box.x1) *
+            if (
+                !coordinates.every(
+                    Number.isFinite
+                )
+            ) {
+                return;
+            }
+
+            const x =
+                coordinates[0] *
                 scaleX;
 
-            const h =
-                (box.y2 - box.y1) *
+            const y =
+                coordinates[1] *
                 scaleY;
 
-            if (box.status === "pending") {
+            const width =
+                (
+                    coordinates[2] -
+                    coordinates[0]
+                ) *
+                scaleX;
+
+            const height =
+                (
+                    coordinates[3] -
+                    coordinates[1]
+                ) *
+                scaleY;
+
+            if (
+                width <= 0 ||
+                height <= 0
+            ) {
+                return;
+            }
+
+            if (
+                box.status ===
+                    "pending" ||
+                box.status ===
+                    "waiting"
+            ) {
                 roiCtx.strokeStyle =
                     "#dc2626";
 
                 roiCtx.fillStyle =
                     "#dc2626";
+
             } else if (
-                box.status === "done"
+                box.status ===
+                "done"
             ) {
                 roiCtx.strokeStyle =
                     "#16a34a";
 
                 roiCtx.fillStyle =
                     "#16a34a";
+
             } else {
                 roiCtx.strokeStyle =
                     "#6b7280";
@@ -1485,13 +2487,14 @@ function drawRoiCanvas() {
                     "#6b7280";
             }
 
-            roiCtx.lineWidth = 3;
+            roiCtx.lineWidth =
+                3;
 
             roiCtx.strokeRect(
                 x,
                 y,
-                w,
-                h
+                width,
+                height
             );
 
             roiCtx.font =
@@ -1500,7 +2503,10 @@ function drawRoiCanvas() {
             roiCtx.fillText(
                 formatNo(index),
                 x + 4,
-                Math.max(16, y - 6)
+                Math.max(
+                    16,
+                    y - 6
+                )
             );
         }
     );
@@ -1516,46 +2522,60 @@ function drawPreviewBox() {
         return;
     }
 
-    const x = Math.min(
-        startPoint.displayX,
-        currentPoint.displayX
-    );
+    const x =
+        Math.min(
+            startPoint.displayX,
+            currentPoint.displayX
+        );
 
-    const y = Math.min(
-        startPoint.displayY,
-        currentPoint.displayY
-    );
+    const y =
+        Math.min(
+            startPoint.displayY,
+            currentPoint.displayY
+        );
 
-    const w = Math.abs(
-        currentPoint.displayX -
-        startPoint.displayX
-    );
+    const width =
+        Math.abs(
+            currentPoint.displayX -
+            startPoint.displayX
+        );
 
-    const h = Math.abs(
-        currentPoint.displayY -
-        startPoint.displayY
-    );
+    const height =
+        Math.abs(
+            currentPoint.displayY -
+            startPoint.displayY
+        );
 
-    roiCtx.strokeStyle = "#7c3aed";
-    roiCtx.lineWidth = 3;
+    roiCtx.save();
 
-    roiCtx.setLineDash([8, 5]);
+    roiCtx.strokeStyle =
+        "#7c3aed";
+
+    roiCtx.lineWidth =
+        3;
+
+    roiCtx.setLineDash([
+        8,
+        5
+    ]);
 
     roiCtx.strokeRect(
         x,
         y,
-        w,
-        h
+        width,
+        height
     );
 
-    roiCtx.setLineDash([]);
+    roiCtx.restore();
 }
 
 
 function formatNo(index) {
     return (
         "No." +
-        String(index + 1).padStart(
+        String(
+            index + 1
+        ).padStart(
             2,
             "0"
         )
@@ -1564,72 +2584,170 @@ function formatNo(index) {
 
 
 function finishBox() {
-    isDrawingBox = false;
+    isDrawingBox =
+        false;
 
-    if (!startPoint || !currentPoint) {
+    if (
+        !startPoint ||
+        !currentPoint
+    ) {
+        startPoint =
+            null;
+
+        currentPoint =
+            null;
+
+        drawRoiCanvas();
+
         return;
     }
 
-    const x1 = Math.min(
-        startPoint.realX,
-        currentPoint.realX
-    );
+    const x1 =
+        Math.min(
+            startPoint.realX,
+            currentPoint.realX
+        );
 
-    const y1 = Math.min(
-        startPoint.realY,
-        currentPoint.realY
-    );
+    const y1 =
+        Math.min(
+            startPoint.realY,
+            currentPoint.realY
+        );
 
-    const x2 = Math.max(
-        startPoint.realX,
-        currentPoint.realX
-    );
+    const x2 =
+        Math.max(
+            startPoint.realX,
+            currentPoint.realX
+        );
 
-    const y2 = Math.max(
-        startPoint.realY,
-        currentPoint.realY
-    );
+    const y2 =
+        Math.max(
+            startPoint.realY,
+            currentPoint.realY
+        );
 
-    const w = x2 - x1;
-    const h = y2 - y1;
+    const width =
+        x2 - x1;
 
-    startPoint = null;
-    currentPoint = null;
+    const height =
+        y2 - y1;
+
+    startPoint =
+        null;
+
+    currentPoint =
+        null;
 
     /*
-    ป้องกัน ROI เล็กเกินไป
-    ซึ่งมักทำให้ OCR อ่านผิด
+    ป้องกัน ROI ที่เล็กเกินไป
+    เพราะมักทำให้ OCR อ่านผิด
     */
-    if (w < 5 || h < 5) {
+    if (
+        width < 5 ||
+        height < 5
+    ) {
         drawRoiCanvas();
+
+        alert(
+            (
+                "ROI มีขนาดเล็กเกินไป " +
+                "กรุณาวาดใหม่"
+            )
+        );
+
         return;
     }
+
+    if (
+        !roiImage ||
+        roiImage.naturalWidth <= 0 ||
+        roiImage.naturalHeight <= 0
+    ) {
+        drawRoiCanvas();
+
+        return;
+    }
+
+    const normalizedX1 =
+        Math.max(
+            0,
+            Math.min(
+                Math.round(x1),
+                roiImage.naturalWidth - 1
+            )
+        );
+
+    const normalizedY1 =
+        Math.max(
+            0,
+            Math.min(
+                Math.round(y1),
+                roiImage.naturalHeight - 1
+            )
+        );
+
+    const normalizedX2 =
+        Math.max(
+            normalizedX1 + 1,
+            Math.min(
+                Math.round(x2),
+                roiImage.naturalWidth
+            )
+        );
+
+    const normalizedY2 =
+        Math.max(
+            normalizedY1 + 1,
+            Math.min(
+                Math.round(y2),
+                roiImage.naturalHeight
+            )
+        );
 
     const box = {
         id:
-            Date.now() +
-            "_" +
-            Math.random(),
+            createClientBoxId(),
 
-        x1: Math.round(x1),
-        y1: Math.round(y1),
-        x2: Math.round(x2),
-        y2: Math.round(y2),
+        x1:
+            normalizedX1,
 
-        value: "Reading...",
-        tag_name: "",
-        unit: "",
-        sensor_api_key: "",
-        status: "pending"
+        y1:
+            normalizedY1,
+
+        x2:
+            normalizedX2,
+
+        y2:
+            normalizedY2,
+
+        value:
+            "Reading...",
+
+        tag_name:
+            "",
+
+        unit:
+            "",
+
+        sensor_api_key:
+            "",
+
+        status:
+            "pending"
     };
 
-    manualBoxes.push(box);
+    manualBoxes.push(
+        box
+    );
 
     markTagsDirty();
 
     drawRoiCanvas();
     updateRoiTable();
-    readBoxWithOCR(box);
+
+    readBoxWithOCR(
+        box
+    );
 }
 
 
@@ -1638,6 +2756,17 @@ function finishBox() {
 ===================================================== */
 
 async function readBoxWithOCR(box) {
+    if (
+        !box ||
+        box.ocrInFlight
+    ) {
+        return;
+    }
+
+    box.ocrInFlight = true;
+
+    let shouldRetry = false;
+
     try {
         const result =
             await readManualRoiWithOCR(
@@ -1649,37 +2778,118 @@ async function readBoxWithOCR(box) {
 
         if (result.ok) {
             box.value =
-                result.text ||
+                result.text ??
+                result.value ??
+                result.raw_text ??
                 "UNKNOWN";
 
-            box.status = "done";
+            box.status =
+                "done";
+
+            box.ocrAttempts =
+                0;
 
         } else if (
-            result.status === "loading"
+            String(
+                result.status || ""
+            )
+                .trim()
+                .toLowerCase() ===
+                "loading"
         ) {
+            const attempts =
+                Number(
+                    box.ocrAttempts || 0
+                );
+
             box.value =
                 result.message ||
                 "Preparing OCR Model...";
 
-            box.status = "waiting";
+            if (
+                attempts <
+                MANUAL_OCR_RETRY_LIMIT
+            ) {
+                box.status =
+                    "waiting";
+
+                box.ocrAttempts =
+                    attempts + 1;
+
+                shouldRetry =
+                    true;
+
+            } else {
+                box.status =
+                    "error";
+
+                box.value =
+                    (
+                        "OCR model did not become " +
+                        "ready in time."
+                    );
+            }
 
         } else {
             box.value =
                 result.message ||
                 "OCR ERROR";
 
-            box.status = "error";
+            box.status =
+                "error";
         }
 
     } catch (error) {
-        console.error(error);
+        console.error(
+            "Manual OCR error:",
+            error
+        );
 
-        box.value = "Cannot connect to OCR service";
-        box.status = "error";
+        box.value =
+            error.message ||
+            "Cannot connect to OCR service";
+
+        box.status =
+            "error";
+
+    } finally {
+        box.ocrInFlight =
+            false;
+
+        drawRoiCanvas();
+        updateRoiTable();
     }
 
-    drawRoiCanvas();
-    updateRoiTable();
+    if (shouldRetry) {
+        window.setTimeout(
+            function () {
+                const stillExists =
+                    manualBoxes.some(
+                        function (item) {
+                            return (
+                                String(
+                                    item.id
+                                ) ===
+                                String(
+                                    box.id
+                                )
+                            );
+                        }
+                    );
+
+                if (
+                    stillExists &&
+                    box.status ===
+                        "waiting"
+                ) {
+                    readBoxWithOCR(
+                        box
+                    );
+                }
+            },
+            MANUAL_OCR_RETRY_DELAY_MS
+        );
+    }
 }
 
 
@@ -1692,52 +2902,92 @@ async function readManualRoiWithOCR(
     if (!roiImage) {
         return {
             ok: false,
-            message: "ROI image element is missing."
+
+            message:
+                (
+                    "ROI image element " +
+                    "is missing."
+                )
         };
     }
 
     const imageName =
-        roiImage.dataset.currentImage;
+        String(
+            roiImage.dataset
+                .currentImage ||
+            ""
+        ).trim();
 
     if (!imageName) {
         return {
             ok: false,
-            message: "Calibrated image name is missing."
-        };
-    }
 
-    const response = await fetch(
-        "/web_api/api/read_manual_roi",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type":
-                    "application/json"
-            },
-            body: JSON.stringify({
-                image: imageName,
-                x1: x1,
-                y1: y1,
-                x2: x2,
-                y2: y2
-            })
-        }
-    );
-
-    const result =
-        await response.json();
-
-    if (!response.ok) {
-        return {
-            ok: false,
             message:
-                result.message ||
-                "Manual OCR request failed."
+                (
+                    "Calibrated image name " +
+                    "is missing."
+                )
         };
     }
 
-    return result;
+    try {
+        return await requestJson(
+            "/web_api/api/read_manual_roi",
+            {
+                method:
+                    "POST",
+
+                json: {
+                    image:
+                        imageName,
+
+                    x1:
+                        x1,
+
+                    y1:
+                        y1,
+
+                    x2:
+                        x2,
+
+                    y2:
+                        y2
+                },
+
+                timeoutMs:
+                    LONG_REQUEST_TIMEOUT_MS
+            }
+        );
+
+    } catch (error) {
+        if (
+            error instanceof
+                SettingsRequestError &&
+            error.payload
+        ) {
+            return {
+                ...error.payload,
+
+                ok:
+                    false,
+
+                message:
+                    (
+                        error.payload
+                            .message ||
+                        error.message ||
+                        (
+                            "Manual OCR " +
+                            "request failed."
+                        )
+                    )
+            };
+        }
+
+        throw error;
+    }
 }
+
 
 /* =====================================================
    ROI TABLE
@@ -1758,13 +3008,24 @@ function updateRoiTable() {
         return;
     }
 
-    tbody.innerHTML = "";
+    tbody.innerHTML =
+        "";
 
     manualBoxes.forEach(
-        function (box, index) {
+        function (
+            box,
+            index
+        ) {
             const row =
                 document.createElement(
                     "tr"
+                );
+
+            const safeBoxId =
+                escapeHtml(
+                    String(
+                        box.id
+                    )
                 );
 
             let statusClass =
@@ -1773,7 +3034,10 @@ function updateRoiTable() {
             let statusText =
                 "Reading";
 
-            if (box.status === "done") {
+            if (
+                box.status ===
+                "done"
+            ) {
                 statusClass =
                     "badge-done";
 
@@ -1781,7 +3045,8 @@ function updateRoiTable() {
                     "Ready";
 
             } else if (
-                box.status === "waiting"
+                box.status ===
+                "waiting"
             ) {
                 statusClass =
                     "badge-pending";
@@ -1790,7 +3055,8 @@ function updateRoiTable() {
                     "Preparing";
 
             } else if (
-                box.status === "error"
+                box.status ===
+                "error"
             ) {
                 statusClass =
                     "badge-error";
@@ -1816,8 +3082,9 @@ function updateRoiTable() {
                     <input
                         type="text"
                         value="${escapeHtml(box.tag_name)}"
-                        data-box-id="${box.id}"
+                        data-box-id="${safeBoxId}"
                         data-field="tag_name"
+                        maxlength="150"
                         placeholder="เช่น Current"
                     >
                 </td>
@@ -1826,18 +3093,20 @@ function updateRoiTable() {
                     <input
                         type="text"
                         value="${escapeHtml(box.unit)}"
-                        data-box-id="${box.id}"
+                        data-box-id="${safeBoxId}"
                         data-field="unit"
+                        maxlength="100"
                         placeholder="เช่น A"
                     >
                 </td>
 
                 <td>
                     <input
-                        type="text"
+                        type="password"
                         value="${escapeHtml(box.sensor_api_key)}"
-                        data-box-id="${box.id}"
+                        data-box-id="${safeBoxId}"
                         data-field="sensor_api_key"
+                        maxlength="4096"
                         placeholder="API Key"
                         autocomplete="off"
                     >
@@ -1848,14 +3117,16 @@ function updateRoiTable() {
                         type="button"
                         class="delete-btn"
                         title="Delete"
-                        onclick="deleteBox('${box.id}')"
+                        data-delete-box-id="${safeBoxId}"
                     >
                         ✕
                     </button>
                 </td>
             `;
 
-            tbody.appendChild(row);
+            tbody.appendChild(
+                row
+            );
         }
     );
 
@@ -1865,6 +3136,7 @@ function updateRoiTable() {
     }
 
     bindTableInputs();
+    bindDeleteButtons();
 }
 
 
@@ -1880,17 +3152,35 @@ function bindTableInputs() {
                 "input",
                 function () {
                     const boxId =
-                        input.dataset.boxId;
+                        input.dataset
+                            .boxId;
 
                     const field =
-                        input.dataset.field;
+                        input.dataset
+                            .field;
+
+                    if (
+                        ![
+                            "tag_name",
+                            "unit",
+                            "sensor_api_key"
+                        ].includes(
+                            field
+                        )
+                    ) {
+                        return;
+                    }
 
                     const box =
                         manualBoxes.find(
                             function (item) {
                                 return (
-                                    String(item.id) ===
-                                    String(boxId)
+                                    String(
+                                        item.id
+                                    ) ===
+                                    String(
+                                        boxId
+                                    )
                                 );
                             }
                         );
@@ -1912,17 +3202,55 @@ function bindTableInputs() {
 }
 
 
+function bindDeleteButtons() {
+    const buttons =
+        document.querySelectorAll(
+            (
+                "#roiTable button" +
+                "[data-delete-box-id]"
+            )
+        );
+
+    buttons.forEach(
+        function (button) {
+            button.addEventListener(
+                "click",
+                function () {
+                    deleteBox(
+                        button.dataset
+                            .deleteBoxId
+                    );
+                }
+            );
+        }
+    );
+}
+
 
 function deleteBox(boxId) {
+    const previousCount =
+        manualBoxes.length;
+
     manualBoxes =
         manualBoxes.filter(
             function (box) {
                 return (
-                    String(box.id) !==
-                    String(boxId)
+                    String(
+                        box.id
+                    ) !==
+                    String(
+                        boxId
+                    )
                 );
             }
         );
+
+    if (
+        manualBoxes.length ===
+        previousCount
+    ) {
+        return;
+    }
 
     markTagsDirty();
 
@@ -1932,12 +3260,29 @@ function deleteBox(boxId) {
 
 
 function escapeHtml(text) {
-    return String(text || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+    return String(
+        text ?? ""
+    )
+        .replaceAll(
+            "&",
+            "&amp;"
+        )
+        .replaceAll(
+            "<",
+            "&lt;"
+        )
+        .replaceAll(
+            ">",
+            "&gt;"
+        )
+        .replaceAll(
+            '"',
+            "&quot;"
+        )
+        .replaceAll(
+            "'",
+            "&#039;"
+        );
 }
 
 
@@ -1957,15 +3302,23 @@ function updateSaveAllButton() {
     }
 
     if (tagsSaving) {
-        saveAllBtn.disabled = true;
+        saveAllBtn.disabled =
+            true;
+
         saveAllBtn.innerText =
             "Saving...";
+
+        saveAllBtn.classList.remove(
+            "save-dirty"
+        );
 
         return;
     }
 
     if (tagsDirty) {
-        saveAllBtn.disabled = false;
+        saveAllBtn.disabled =
+            false;
+
         saveAllBtn.innerText =
             "Save Changes";
 
@@ -1976,7 +3329,9 @@ function updateSaveAllButton() {
         return;
     }
 
-    saveAllBtn.disabled = true;
+    saveAllBtn.disabled =
+        true;
+
     saveAllBtn.innerText =
         "Saved";
 
@@ -1987,14 +3342,16 @@ function updateSaveAllButton() {
 
 
 function markTagsDirty() {
-    tagsDirty = true;
+    tagsDirty =
+        true;
 
     updateSaveAllButton();
 }
 
 
 function markTagsSaved() {
-    tagsDirty = false;
+    tagsDirty =
+        false;
 
     updateSaveAllButton();
 }
@@ -2012,21 +3369,59 @@ function createSavedBox(
             ""
         ).trim();
 
+    const x1 =
+        Number(
+            tag.x1 ??
+            tag.roi_x1 ??
+            0
+        );
+
+    const y1 =
+        Number(
+            tag.y1 ??
+            tag.roi_y1 ??
+            0
+        );
+
+    const x2 =
+        Number(
+            tag.x2 ??
+            tag.roi_x2 ??
+            0
+        );
+
+    const y2 =
+        Number(
+            tag.y2 ??
+            tag.roi_y2 ??
+            0
+        );
+
     const matchingBox =
         previousBoxes.find(
             function (box) {
                 return (
                     String(
-                        box.tag_name ?? ""
-                    ).trim() === tagName &&
-                    Number(box.x1) ===
-                        Number(tag.x1) &&
-                    Number(box.y1) ===
-                        Number(tag.y1) &&
-                    Number(box.x2) ===
-                        Number(tag.x2) &&
-                    Number(box.y2) ===
-                        Number(tag.y2)
+                        box.tag_name ??
+                        ""
+                    ).trim() ===
+                        tagName &&
+
+                    Number(
+                        box.x1
+                    ) === x1 &&
+
+                    Number(
+                        box.y1
+                    ) === y1 &&
+
+                    Number(
+                        box.x2
+                    ) === x2 &&
+
+                    Number(
+                        box.y2
+                    ) === y2
                 );
             }
         ) ||
@@ -2034,30 +3429,423 @@ function createSavedBox(
         null;
 
     return {
-        id: tag.id,
+        id:
+            tag.id ??
+            matchingBox?.id ??
+            createClientBoxId(),
 
-        x1: Number(tag.x1),
-        y1: Number(tag.y1),
-        x2: Number(tag.x2),
-        y2: Number(tag.y2),
+        x1:
+            x1,
+
+        y1:
+            y1,
+
+        x2:
+            x2,
+
+        y2:
+            y2,
 
         value:
             matchingBox?.value ??
             "Saved",
 
-        tag_name: tagName,
+        tag_name:
+            tagName,
 
         unit:
             String(
-                tag.unit ?? ""
+                tag.unit ??
+                ""
             ),
 
         sensor_api_key:
             String(
-                tag.sensor_api_key ?? ""
+                tag.sensor_api_key ??
+                ""
             ),
 
-        status: "done"
+        status:
+            "done",
+
+        ocrAttempts:
+            0,
+
+        ocrInFlight:
+            false
+    };
+}
+
+
+function validateTagBoxesForSave() {
+    const tagsToSave =
+        [];
+
+    const seenTagNames =
+        new Set();
+
+    const notReady =
+        manualBoxes.some(
+            function (box) {
+                return (
+                    box.status ===
+                        "pending" ||
+
+                    box.status ===
+                        "waiting" ||
+
+                    box.ocrInFlight ===
+                        true
+                );
+            }
+        );
+
+    if (notReady) {
+        return {
+            ok:
+                false,
+
+            message:
+                (
+                    "ยังมี ROI ที่กำลังอ่าน OCR " +
+                    "กรุณารอสักครู่"
+                ),
+
+            tags:
+                []
+        };
+    }
+
+    for (
+        const box of manualBoxes
+    ) {
+        const tagName =
+            String(
+                box.tag_name ??
+                ""
+            ).trim();
+
+        if (!tagName) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "กรุณาใส่ Tag Name " +
+                        "ให้ครบทุกช่อง"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        if (
+            tagName.length >
+            150
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "Tag Name ต้องไม่เกิน " +
+                        "150 ตัวอักษร"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        if (
+            tagName.includes(
+                "\u0000"
+            )
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "Tag Name มีอักขระ " +
+                        "ที่ไม่ถูกต้อง"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        const normalizedTagName =
+            tagName.toLocaleLowerCase();
+
+        if (
+            seenTagNames.has(
+                normalizedTagName
+            )
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "พบ Tag Name ซ้ำ: " +
+                        tagName
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        seenTagNames.add(
+            normalizedTagName
+        );
+
+        const x1 =
+            Number(
+                box.x1
+            );
+
+        const y1 =
+            Number(
+                box.y1
+            );
+
+        const x2 =
+            Number(
+                box.x2
+            );
+
+        const y2 =
+            Number(
+                box.y2
+            );
+
+        if (
+            ![
+                x1,
+                y1,
+                x2,
+                y2
+            ].every(
+                Number.isFinite
+            ) ||
+            x1 < 0 ||
+            y1 < 0 ||
+            x2 <= x1 ||
+            y2 <= y1
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "พิกัด ROI ของ " +
+                        tagName +
+                        " ไม่ถูกต้อง"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        if (
+            roiImage &&
+            roiImage.naturalWidth > 0 &&
+            roiImage.naturalHeight > 0
+        ) {
+            if (
+                x1 >=
+                    roiImage.naturalWidth ||
+
+                y1 >=
+                    roiImage.naturalHeight ||
+
+                x2 >
+                    roiImage.naturalWidth ||
+
+                y2 >
+                    roiImage.naturalHeight
+            ) {
+                return {
+                    ok:
+                        false,
+
+                    message:
+                        (
+                            "พิกัด ROI ของ " +
+                            tagName +
+                            " อยู่นอกขอบภาพ"
+                        ),
+
+                    tags:
+                        []
+                };
+            }
+        }
+
+        const unit =
+            String(
+                box.unit ??
+                ""
+            ).trim();
+
+        const sensorApiKey =
+            String(
+                box.sensor_api_key ??
+                ""
+            ).trim();
+
+        if (
+            unit.length >
+            100
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "Unit ของ " +
+                        tagName +
+                        " ยาวเกินไป"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        if (
+            unit.includes(
+                "\u0000"
+            )
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "Unit ของ " +
+                        tagName +
+                        " มีอักขระที่ไม่ถูกต้อง"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        if (
+            sensorApiKey.length >
+            4096
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "Sensor API Key ของ " +
+                        tagName +
+                        " ยาวเกินไป"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        if (
+            sensorApiKey.includes(
+                "\u0000"
+            )
+        ) {
+            return {
+                ok:
+                    false,
+
+                message:
+                    (
+                        "Sensor API Key ของ " +
+                        tagName +
+                        " มีอักขระที่ไม่ถูกต้อง"
+                    ),
+
+                tags:
+                    []
+            };
+        }
+
+        const payload = {
+            tag_name:
+                tagName,
+
+            unit:
+                unit,
+
+            sensor_api_key:
+                sensorApiKey,
+
+            x1:
+                Math.round(
+                    x1
+                ),
+
+            y1:
+                Math.round(
+                    y1
+                ),
+
+            x2:
+                Math.round(
+                    x2
+                ),
+
+            y2:
+                Math.round(
+                    y2
+                )
+        };
+
+        const databaseId =
+            Number(
+                box.id
+            );
+
+        if (
+            Number.isInteger(
+                databaseId
+            ) &&
+            databaseId > 0
+        ) {
+            payload.id =
+                databaseId;
+        }
+
+        tagsToSave.push(
+            payload
+        );
+    }
+
+    return {
+        ok:
+            true,
+
+        message:
+            "",
+
+        tags:
+            tagsToSave
     };
 }
 
@@ -2073,113 +3861,44 @@ if (saveAllBtn) {
                 return;
             }
 
-            const notReady =
-                manualBoxes.some(
-                    function (box) {
-                        return (
-                            box.status ===
-                                "pending" ||
-                            box.status ===
-                                "waiting"
-                        );
-                    }
-                );
+            const validation =
+                validateTagBoxesForSave();
 
-            if (notReady) {
+            if (!validation.ok) {
                 alert(
-                    "ยังมี ROI ที่กำลังอ่าน OCR กรุณารอสักครู่"
+                    validation.message
                 );
 
                 return;
             }
 
-            const tagsToSave = [];
+            tagsSaving =
+                true;
 
-            for (
-                const box of manualBoxes
-            ) {
-                const tagName =
-                    String(
-                        box.tag_name ?? ""
-                    ).trim();
-
-                if (!tagName) {
-                    alert(
-                        "กรุณาใส่ Tag Name ให้ครบทุกช่อง"
-                    );
-
-                    return;
-                }
-
-                const payload = {
-                    tag_name: tagName,
-
-                    unit:
-                        String(
-                            box.unit ?? ""
-                        ).trim(),
-
-                    sensor_api_key:
-                        String(
-                            box.sensor_api_key ??
-                            ""
-                        ).trim(),
-
-                    x1: box.x1,
-                    y1: box.y1,
-                    x2: box.x2,
-                    y2: box.y2
-                };
-
-                const databaseId =
-                    Number(box.id);
-
-                if (
-                    Number.isInteger(
-                        databaseId
-                    ) &&
-                    databaseId > 0
-                ) {
-                    payload.id =
-                        databaseId;
-                }
-
-                tagsToSave.push(
-                    payload
-                );
-            }
-
-            tagsSaving = true;
             updateSaveAllButton();
 
             try {
-                const response =
-                    await fetch(
+                const result =
+                    await requestJson(
                         "/web_api/api/save_user_tags",
                         {
-                            method: "POST",
+                            method:
+                                "POST",
 
-                            headers: {
-                                "Content-Type":
-                                    "application/json"
+                            json: {
+                                tags:
+                                    validation.tags
                             },
 
-                            body: JSON.stringify({
-                                tags: tagsToSave
-                            })
+                            timeoutMs:
+                                LONG_REQUEST_TIMEOUT_MS
                         }
                     );
 
-                const result =
-                    await response.json();
-
-                if (
-                    !response.ok ||
-                    !result.ok
-                ) {
+                if (!result.ok) {
                     throw new Error(
                         result.message ||
-                        "Save failed"
+                        "Save failed."
                     );
                 }
 
@@ -2189,12 +3908,17 @@ if (saveAllBtn) {
                     )
                 ) {
                     throw new Error(
-                        "Saved tags were not returned by the server"
+                        (
+                            "Saved tags were not " +
+                            "returned by the server."
+                        )
                     );
                 }
 
                 const previousBoxes =
-                    [...manualBoxes];
+                    [
+                        ...manualBoxes
+                    ];
 
                 manualBoxes =
                     result.tags.map(
@@ -2227,11 +3951,12 @@ if (saveAllBtn) {
 
                 alert(
                     error.message ||
-                    "Save failed"
+                    "Save failed."
                 );
 
             } finally {
-                tagsSaving = false;
+                tagsSaving =
+                    false;
 
                 updateSaveAllButton();
             }
@@ -2245,58 +3970,79 @@ if (saveAllBtn) {
 ===================================================== */
 
 async function checkLatestRawImage() {
-    if (!hmiImage) {
-        return;
+    if (
+        !hmiImage ||
+        rawPoints.length > 0 ||
+        rawImageRequestInFlight ||
+        (
+            captureImageBtn &&
+            captureImageBtn.disabled
+        )
+    ) {
+        return false;
     }
 
-    if (rawPoints.length > 0) {
-        return;
-    }
+    rawImageRequestInFlight =
+        true;
 
     try {
-        const response = await fetch(
-            "/web_api/api/latest_raw_image"
-        );
-
         const result =
-            await response.json();
+            await requestJson(
+                (
+                    "/web_api/api/latest_raw_image" +
+                    "?t=" +
+                    Date.now()
+                ),
+                {
+                    timeoutMs:
+                        POLL_REQUEST_TIMEOUT_MS
+                }
+            );
 
         if (
             !result.ok ||
-            !result.image
+            !result.image ||
+            !result.image_url
         ) {
-            return;
+            return false;
         }
 
         if (
-            hmiImage.dataset.currentImage ===
+            hmiImage.dataset
+                .currentImage ===
             result.image
         ) {
-            return;
+            return true;
         }
 
-        hmiImage.dataset.currentImage =
-            result.image;
+        await loadRawImageImmediately(
+            result.image_url,
+            result.image
+        );
 
-        hmiImage.onload = function () {
-            drawCtx =
-                setupCanvasForImage(
-                    hmiImage,
-                    drawCanvas
-                );
+        const imagePathElement =
+            document.getElementById(
+                "imagePath"
+            );
 
-            drawCalibrationPoints();
-        };
+        if (imagePathElement) {
+            imagePathElement.innerText =
+                result.image;
+        }
 
-        hmiImage.src =
-            result.image_url +
-            "?t=" +
-            new Date().getTime();
+        return true;
+
     } catch (error) {
         console.error(
             "Latest raw image error:",
             error
         );
+
+        return false;
+
+    } finally {
+        rawImageRequestInFlight =
+            false;
     }
 }
 
@@ -2304,6 +4050,56 @@ async function checkLatestRawImage() {
 async function checkLatestCalibratedImage(
     forceRefresh = false
 ) {
+    if (
+        calibratedImageRequestInFlight
+    ) {
+        if (!forceRefresh) {
+            return false;
+        }
+
+        /*
+        หากมีการโหลดภาพอยู่แล้วจาก Polling
+        ให้รอจนคำขอเดิมจบก่อน
+
+        รอได้สูงสุดประมาณ 12 วินาที
+        */
+        for (
+            let attempt = 0;
+            attempt < 120 &&
+                calibratedImageRequestInFlight;
+            attempt++
+        ) {
+            await wait(
+                100
+            );
+        }
+
+        if (
+            calibratedImageRequestInFlight
+        ) {
+            return false;
+        }
+    }
+
+    /*
+    ห้ามเปลี่ยนภาพ Manual ROI อัตโนมัติ
+    ระหว่างกำลังวาดหรือมีข้อมูลยังไม่บันทึก
+
+    forceRefresh=true ใช้หลัง Save Calibration
+    จึงอนุญาตให้อัปเดตภาพทันที
+    */
+    if (
+        !forceRefresh &&
+        (
+            drawMode ||
+            isDrawingBox ||
+            tagsSaving ||
+            tagsDirty
+        )
+    ) {
+        return true;
+    }
+
     const preview =
         document.getElementById(
             "calibratedPreview"
@@ -2329,20 +4125,24 @@ async function checkLatestCalibratedImage(
             "testStatus"
         );
 
-    try {
-        const response = await fetch(
-            "/web_api/api/latest_calibrated_image?t=" +
-            Date.now(),
-            {
-                cache: "no-store"
-            }
-        );
+    calibratedImageRequestInFlight =
+        true;
 
+    try {
         const result =
-            await response.json();
+            await requestJson(
+                (
+                    "/web_api/api/latest_calibrated_image" +
+                    "?t=" +
+                    Date.now()
+                ),
+                {
+                    timeoutMs:
+                        POLL_REQUEST_TIMEOUT_MS
+                }
+            );
 
         if (
-            !response.ok ||
             !result.ok ||
             !result.image ||
             !result.image_url
@@ -2350,73 +4150,82 @@ async function checkLatestCalibratedImage(
             return false;
         }
 
-        const cacheKey =
-            result.image_url.includes("?")
-                ? "&t=" + Date.now()
-                : "?t=" + Date.now();
+        const previewNeedsUpdate =
+            Boolean(
+                preview &&
+                (
+                    forceRefresh ||
+                    preview.dataset
+                        .currentImage !==
+                        result.image
+                )
+            );
 
-        const newImageUrl =
-            result.image_url +
-            cacheKey;
+        const roiNeedsUpdate =
+            Boolean(
+                roiSetupImage &&
+                (
+                    forceRefresh ||
+                    roiSetupImage.dataset
+                        .currentImage !==
+                        result.image
+                )
+            );
 
-        /*
-        อัปเดตภาพข้อ 3:
-        Calibration Result
-        */
-        if (preview) {
-            await new Promise(function (
-                resolve,
-                reject
-            ) {
-                preview.onload = function () {
-                    preview.style.display = "";
-
-                    if (placeholder) {
-                        placeholder.style.display =
-                            "none";
-                    }
-
-                    if (resultContainer) {
-                        resultContainer.style.display =
-                            "";
-                    }
-
-                    if (status) {
-                        status.innerText =
-                            "✅ Calibration Ready";
-
-                        status.classList.remove(
-                            "calibration-not-ready"
-                        );
-
-                        status.classList.add(
-                            "calibration-ready"
-                        );
-                    }
-
-                    preview.dataset.currentImage =
-                        result.image;
-
-                    resolve(true);
-                };
-
-                preview.onerror = function () {
-                    reject(
-                        new Error(
-                            "Cannot load Calibration Result image."
-                        )
-                    );
-                };
-
-                preview.src = newImageUrl;
-            });
+        if (
+            !previewNeedsUpdate &&
+            !roiNeedsUpdate
+        ) {
+            return true;
         }
 
         /*
-            อัปเดตภาพข้อ 4:
-            Manual ROI Setup
+        อัปเดตภาพส่วน Calibration Result
         */
-        if (roiSetupImage) {
+        if (previewNeedsUpdate) {
+            await loadImageElement(
+                preview,
+                result.image_url,
+                (
+                    "Cannot load Calibration " +
+                    "Result image."
+                )
+            );
+
+            preview.dataset.currentImage =
+                result.image;
+
+            preview.style.display =
+                "";
+
+            if (placeholder) {
+                placeholder.style.display =
+                    "none";
+            }
+
+            if (resultContainer) {
+                resultContainer.style.display =
+                    "";
+            }
+
+            if (status) {
+                status.innerText =
+                    "✅ Calibration Ready";
+
+                status.classList.remove(
+                    "calibration-not-ready"
+                );
+
+                status.classList.add(
+                    "calibration-ready"
+                );
+            }
+        }
+
+        /*
+        อัปเดตภาพส่วน Manual ROI Setup
+        */
+        if (roiNeedsUpdate) {
             const roiSetupContent =
                 document.getElementById(
                     "roiSetupContent"
@@ -2432,54 +4241,48 @@ async function checkLatestCalibratedImage(
                     "drawRoiBtn"
                 );
 
-            roiSetupImage.dataset.currentImage =
+            await loadImageElement(
+                roiSetupImage,
+                result.image_url,
+                (
+                    "Cannot load Manual " +
+                    "ROI image."
+                )
+            );
+
+            /*
+            เปลี่ยน currentImage หลังรูป
+            โหลดสำเร็จแล้วเท่านั้น
+            */
+            roiSetupImage.dataset
+                .currentImage =
                 result.image;
 
-            await new Promise(function (
-                resolve,
-                reject
-            ) {
-                roiSetupImage.onload = function () {
-                    roiSetupImage.style.display =
-                        "";
+            roiSetupImage.style.display =
+                "";
 
-                    if (roiSetupContent) {
-                        roiSetupContent.style.display =
-                            "";
-                    }
+            if (roiSetupContent) {
+                roiSetupContent.style.display =
+                    "";
+            }
 
-                    if (roiNotReadyMessage) {
-                        roiNotReadyMessage.style.display =
-                            "none";
-                    }
+            if (roiNotReadyMessage) {
+                roiNotReadyMessage.style.display =
+                    "none";
+            }
 
-                    if (drawRoiButton) {
-                        drawRoiButton.style.display =
-                            "";
-                    }
+            if (drawRoiButton) {
+                drawRoiButton.style.display =
+                    "";
+            }
 
-                    roiCtx =
-                        setupCanvasForImage(
-                            roiSetupImage,
-                            roiCanvas
-                        );
+            roiCtx =
+                setupCanvasForImage(
+                    roiSetupImage,
+                    roiCanvas
+                );
 
-                    drawRoiCanvas();
-
-                    resolve(true);
-                };
-
-                roiSetupImage.onerror = function () {
-                    reject(
-                        new Error(
-                            "Cannot load Manual ROI image."
-                        )
-                    );
-                };
-
-                roiSetupImage.src =
-                    newImageUrl;
-            });
+            drawRoiCanvas();
         }
 
         return true;
@@ -2491,32 +4294,44 @@ async function checkLatestCalibratedImage(
         );
 
         return false;
+
+    } finally {
+        calibratedImageRequestInFlight =
+            false;
     }
 }
+
+
 /* =====================================================
    RESIZE HANDLING
 ===================================================== */
 
-let resizeTimer = null;
+let resizeTimer =
+    null;
+
 
 window.addEventListener(
     "resize",
     function () {
-        clearTimeout(resizeTimer);
-
-        resizeTimer = setTimeout(
-            function () {
-                resizeAllCanvases();
-            },
-            100
+        window.clearTimeout(
+            resizeTimer
         );
+
+        resizeTimer =
+            window.setTimeout(
+                function () {
+                    resizeAllCanvases();
+                },
+                100
+            );
     }
 );
 
 
 if (
     roiImage &&
-    typeof ResizeObserver !== "undefined"
+    typeof ResizeObserver !==
+        "undefined"
 ) {
     const roiResizeObserver =
         new ResizeObserver(
@@ -2539,7 +4354,8 @@ if (
 
 if (
     hmiImage &&
-    typeof ResizeObserver !== "undefined"
+    typeof ResizeObserver !==
+        "undefined"
 ) {
     const calibrationResizeObserver =
         new ResizeObserver(
@@ -2564,15 +4380,81 @@ if (
    PERIODIC REFRESH
 ===================================================== */
 
-setInterval(
-    checkLatestRawImage,
-    10000
+const rawImageInterval =
+    window.setInterval(
+        function () {
+            if (!document.hidden) {
+                checkLatestRawImage();
+            }
+        },
+        10000
+    );
+
+
+const calibratedImageInterval =
+    window.setInterval(
+        function () {
+            if (!document.hidden) {
+                checkLatestCalibratedImage();
+            }
+        },
+        10000
+    );
+
+
+document.addEventListener(
+    "visibilitychange",
+    function () {
+        if (!document.hidden) {
+            checkLatestRawImage();
+
+            checkLatestCalibratedImage();
+
+            checkOcrModelStatus();
+        }
+    }
 );
 
-setInterval(
-    checkLatestCalibratedImage,
-    10000
+
+/*
+เตือนก่อนปิดหรือออกจากหน้า
+เมื่อ ROI มีการแก้ไขแต่ยังไม่ได้บันทึก
+*/
+window.addEventListener(
+    "beforeunload",
+    function (event) {
+        if (
+            tagsDirty &&
+            !tagsSaving
+        ) {
+            event.preventDefault();
+
+            event.returnValue =
+                "";
+        }
+    }
 );
+
+
+/*
+หยุด Interval เมื่อหน้าเว็บถูกนำออก
+เพื่อไม่ให้มี Polling ค้าง
+*/
+window.addEventListener(
+    "pagehide",
+    function () {
+        window.clearInterval(
+            rawImageInterval
+        );
+
+        window.clearInterval(
+            calibratedImageInterval
+        );
+
+        stopOcrStatusMonitoring();
+    }
+);
+
 
 /* =====================================================
    CAMERA SETTINGS
@@ -2583,279 +4465,485 @@ const saveCameraBtn =
         "saveCameraBtn"
     );
 
-if (saveCameraBtn) {
-
-    saveCameraBtn.addEventListener(
-        "click",
-        async function () {
-
-            const originalText =
-                saveCameraBtn.innerText;
-
-            saveCameraBtn.disabled = true;
-            saveCameraBtn.innerText = "Saving...";
-
-            const payload = {
-
-                camera_name:
-                    document.getElementById(
-                        "cameraName"
-                    ).value.trim(),
-
-                camera_ip:
-                    document.getElementById(
-                        "cameraIp"
-                    ).value.trim(),
-
-                camera_port:
-                    parseInt(
-                        document.getElementById(
-                            "cameraPort"
-                        ).value,
-                        10
-                    ) || 554,
-
-                camera_username:
-                    document.getElementById(
-                        "cameraUsername"
-                    ).value.trim(),
-
-                camera_password:
-                    document.getElementById(
-                        "cameraPassword"
-                    ).value,
-
-                rtsp_path:
-                    document.getElementById(
-                        "cameraRtspPath"
-                    ).value.trim()
-            };
-
-            try {
-
-                const response =
-                    await fetch(
-                        "/web_api/api/camera/config",
-                        {
-                            method: "POST",
-
-                            headers: {
-                                "Content-Type":
-                                    "application/json"
-                            },
-
-                            body: JSON.stringify(
-                                payload
-                            )
-                        }
-                    );
-
-                const result =
-                    await response.json();
-
-                if (result.ok) {
-
-                    alert(
-                        "Camera configuration saved."
-                    );
-
-                } else {
-
-                    alert(
-                        result.message ||
-                        "Save failed"
-                    );
-
-                }
-
-            } catch (error) {
-
-                console.error(error);
-
-                alert(
-                    "Cannot save camera configuration."
-                );
-
-            } finally {
-
-                saveCameraBtn.disabled = false;
-                saveCameraBtn.innerText = originalText;
-
-            }
-
-        }
-    );
-
-}
-
-/* =====================================================
-   TEST CAMERA CONNECTION
-===================================================== */
-
 const testCameraBtn =
     document.getElementById(
         "testCameraBtn"
     );
 
-if (testCameraBtn) {
 
+function getInputElement(
+    elementId
+) {
+    const element =
+        document.getElementById(
+            elementId
+        );
+
+    if (!element) {
+        throw new Error(
+            (
+                "Required form field is missing: " +
+                elementId
+            )
+        );
+    }
+
+    return element;
+}
+
+
+function readInputValue(
+    elementId,
+    trim = true
+) {
+    const value =
+        String(
+            getInputElement(
+                elementId
+            ).value ?? ""
+        );
+
+    return trim
+        ? value.trim()
+        : value;
+}
+
+
+function parseCameraPort() {
+    const rawValue =
+        readInputValue(
+            "cameraPort"
+        );
+
+    if (!rawValue) {
+        return 554;
+    }
+
+    const port =
+        Number(
+            rawValue
+        );
+
+    if (
+        !Number.isInteger(
+            port
+        ) ||
+        port < 1 ||
+        port > 65535
+    ) {
+        throw new Error(
+            (
+                "Camera Port ต้องเป็นตัวเลข " +
+                "ระหว่าง 1 ถึง 65535"
+            )
+        );
+    }
+
+    return port;
+}
+
+
+function buildCameraPayload(
+    includeName
+) {
+    const cameraIp =
+        readInputValue(
+            "cameraIp"
+        );
+
+    const rtspPath =
+        readInputValue(
+            "cameraRtspPath"
+        );
+
+    if (!cameraIp) {
+        throw new Error(
+            "กรุณากรอก Camera IP"
+        );
+    }
+
+    if (!rtspPath) {
+        throw new Error(
+            "กรุณากรอก RTSP Path"
+        );
+    }
+
+    const payload = {
+        camera_ip:
+            cameraIp,
+
+        camera_port:
+            parseCameraPort(),
+
+        camera_username:
+            readInputValue(
+                "cameraUsername"
+            ),
+
+        camera_password:
+            readInputValue(
+                "cameraPassword",
+                false
+            ),
+
+        rtsp_path:
+            rtspPath
+    };
+
+    if (includeName) {
+        payload.camera_name =
+            readInputValue(
+                "cameraName"
+            );
+    }
+
+    return payload;
+}
+
+
+function setCameraControlsBusy(
+    activeButton,
+    busyText,
+    isBusy,
+    originalText
+) {
+    if (saveCameraBtn) {
+        saveCameraBtn.disabled =
+            isBusy;
+    }
+
+    if (testCameraBtn) {
+        testCameraBtn.disabled =
+            isBusy;
+    }
+
+    if (activeButton) {
+        activeButton.innerText =
+            isBusy
+                ? busyText
+                : originalText;
+    }
+}
+
+
+if (saveCameraBtn) {
+    saveCameraBtn.addEventListener(
+        "click",
+        async function () {
+            if (
+                cameraRequestInFlight
+            ) {
+                return;
+            }
+
+            cameraRequestInFlight =
+                true;
+
+            const originalText =
+                saveCameraBtn.innerText;
+
+            setCameraControlsBusy(
+                saveCameraBtn,
+                "Saving...",
+                true,
+                originalText
+            );
+
+            try {
+                const payload =
+                    buildCameraPayload(
+                        true
+                    );
+
+                const result =
+                    await requestJson(
+                        "/web_api/api/camera/config",
+                        {
+                            method:
+                                "POST",
+
+                            json:
+                                payload,
+
+                            timeoutMs:
+                                LONG_REQUEST_TIMEOUT_MS
+                        }
+                    );
+
+                if (!result.ok) {
+                    throw new Error(
+                        result.message ||
+                        "Save failed."
+                    );
+                }
+
+                alert(
+                    result.message ||
+                    (
+                        "Camera configuration " +
+                        "saved."
+                    )
+                );
+
+            } catch (error) {
+                console.error(
+                    (
+                        "Cannot save camera " +
+                        "configuration:"
+                    ),
+                    error
+                );
+
+                alert(
+                    error.message ||
+                    (
+                        "Cannot save camera " +
+                        "configuration."
+                    )
+                );
+
+            } finally {
+                cameraRequestInFlight =
+                    false;
+
+                setCameraControlsBusy(
+                    saveCameraBtn,
+                    "Saving...",
+                    false,
+                    originalText
+                );
+            }
+        }
+    );
+}
+
+
+/* =====================================================
+   TEST CAMERA CONNECTION
+===================================================== */
+
+if (testCameraBtn) {
     testCameraBtn.addEventListener(
         "click",
         async function () {
+            if (
+                cameraRequestInFlight
+            ) {
+                return;
+            }
+
+            cameraRequestInFlight =
+                true;
 
             const originalText =
                 testCameraBtn.innerText;
 
-            testCameraBtn.disabled = true;
-            testCameraBtn.innerText = "Testing...";
-
-            const payload = {
-
-                camera_ip:
-                    document.getElementById(
-                        "cameraIp"
-                    ).value.trim(),
-
-                camera_port:
-                    parseInt(
-                        document.getElementById(
-                            "cameraPort"
-                        ).value,
-                        10
-                    ) || 554,
-
-                camera_username:
-                    document.getElementById(
-                        "cameraUsername"
-                    ).value.trim(),
-
-                camera_password:
-                    document.getElementById(
-                        "cameraPassword"
-                    ).value,
-
-                rtsp_path:
-                    document.getElementById(
-                        "cameraRtspPath"
-                    ).value.trim()
-            };
+            setCameraControlsBusy(
+                testCameraBtn,
+                "Testing...",
+                true,
+                originalText
+            );
 
             try {
-
-                const response =
-                    await fetch(
-                        "/web_api/api/camera/test",
-                        {
-                            method: "POST",
-
-                            headers: {
-                                "Content-Type":
-                                    "application/json"
-                            },
-
-                            body: JSON.stringify(
-                                payload
-                            )
-                        }
+                const payload =
+                    buildCameraPayload(
+                        false
                     );
 
                 const result =
-                    await response.json();
+                    await requestJson(
+                        "/web_api/api/camera/test",
+                        {
+                            method:
+                                "POST",
 
-                if (result.ok) {
+                            json:
+                                payload,
 
-                    alert(
-                        result.message
+                            timeoutMs:
+                                LONG_REQUEST_TIMEOUT_MS
+                        }
                     );
 
-                } else {
-
-                    alert(
+                if (!result.ok) {
+                    throw new Error(
                         result.message ||
-                        "Cannot connect camera."
+                        (
+                            "Cannot connect " +
+                            "camera."
+                        )
                     );
-
                 }
 
-            } catch (error) {
+                alert(
+                    result.message ||
+                    (
+                        "Camera connected " +
+                        "successfully."
+                    )
+                );
 
-                console.error(error);
+            } catch (error) {
+                console.error(
+                    "Cannot test camera:",
+                    error
+                );
 
                 alert(
+                    error.message ||
                     "Cannot connect camera."
                 );
 
             } finally {
+                cameraRequestInFlight =
+                    false;
 
-                testCameraBtn.disabled = false;
-                testCameraBtn.innerText = originalText;
-
+                setCameraControlsBusy(
+                    testCameraBtn,
+                    "Testing...",
+                    false,
+                    originalText
+                );
             }
-
         }
     );
-
 }
+
 
 /* =====================================================
    LOAD CAMERA CONFIGURATION
 ===================================================== */
 
+function setInputValue(
+    elementId,
+    value
+) {
+    const element =
+        document.getElementById(
+            elementId
+        );
+
+    if (!element) {
+        return;
+    }
+
+    element.value =
+        value === null ||
+        value === undefined
+            ? ""
+            : String(
+                value
+            );
+}
+
+
 async function loadCameraConfiguration() {
-
     try {
-
-        const response =
-            await fetch(
-                "/web_api/api/camera/config"
+        const result =
+            await requestJson(
+                "/web_api/api/camera/config",
+                {
+                    timeoutMs:
+                        POLL_REQUEST_TIMEOUT_MS
+                }
             );
 
-        const result =
-            await response.json();
-
-        if (!result.ok) {
+        /*
+        กรณียังไม่เคยตั้งค่ากล้อง
+        API จะคืน ok=false และ configured=false
+        โดยไม่ถือเป็น Error ของหน้าเว็บ
+        */
+        if (
+            !result.ok ||
+            !result.camera ||
+            typeof result.camera !==
+                "object" ||
+            Array.isArray(
+                result.camera
+            )
+        ) {
             return;
         }
 
-        const camera = result.camera;
+        const camera =
+            result.camera;
 
-        document.getElementById(
-            "cameraName"
-        ).value = camera.camera_name || "";
-
-        document.getElementById(
-            "cameraIp"
-        ).value = camera.camera_ip || "";
-
-        document.getElementById(
-            "cameraPort"
-        ).value = camera.camera_port || 554;
-
-        document.getElementById(
-            "cameraUsername"
-        ).value = camera.camera_username || "";
-
-        document.getElementById(
-            "cameraPassword"
-        ).value = camera.camera_password || "";
-
-        document.getElementById(
-            "cameraRtspPath"
-        ).value = camera.rtsp_path || "";
-
-    } catch (error) {
-
-        console.error(
-            "Cannot load camera configuration:",
-            error
+        setInputValue(
+            "cameraName",
+            camera.camera_name
         );
 
-    }
+        setInputValue(
+            "cameraIp",
+            camera.camera_ip
+        );
 
+        setInputValue(
+            "cameraPort",
+            camera.camera_port || 554
+        );
+
+        setInputValue(
+            "cameraUsername",
+            camera.camera_username
+        );
+
+        setInputValue(
+            "cameraPassword",
+            camera.camera_password
+        );
+
+        setInputValue(
+            "cameraRtspPath",
+            camera.rtsp_path
+        );
+
+    } catch (error) {
+        if (
+            error instanceof
+                SettingsRequestError &&
+            error.status === 404
+        ) {
+            return;
+        }
+
+        console.error(
+            (
+                "Cannot load camera " +
+                "configuration:"
+            ),
+            error
+        );
+    }
 }
+
+
+/* =====================================================
+   INITIALIZATION
+===================================================== */
+
+/*
+ผูก Pointer Event สำหรับวาด ROI
+หลังจากประกาศฟังก์ชันทั้งหมดแล้ว
+*/
+configureRoiImageEvents();
+
 
 updateRoiTable();
 updateSaveAllButton();
 
+
 loadCameraConfiguration();
+
+
 startOcrStatusMonitoring();
+
+
+/*
+ตรวจภาพล่าสุดทันทีเมื่อเปิดหน้า
+โดยไม่ต้องรอ Polling รอบแรก 10 วินาที
+*/
+checkLatestRawImage();
+
+checkLatestCalibratedImage();
