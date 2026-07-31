@@ -3085,7 +3085,7 @@ function updateRoiTable() {
                         data-box-id="${safeBoxId}"
                         data-field="tag_name"
                         maxlength="150"
-                        placeholder="เช่น Current"
+                        placeholder="such as Current"
                     >
                 </td>
 
@@ -3096,7 +3096,7 @@ function updateRoiTable() {
                         data-box-id="${safeBoxId}"
                         data-field="unit"
                         maxlength="100"
-                        placeholder="เช่น A"
+                        placeholder="such as A"
                     >
                 </td>
 
