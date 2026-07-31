@@ -376,26 +376,14 @@ DIRECTORY_INITIALIZATION_ERRORS = (
 # RTSP CAPTURE
 # =====================================================
 
-PROCESS_CHECK_INTERVAL = _get_env_int(
-    "PROCESS_CHECK_INTERVAL",
-    default=5,
-    minimum=1,
-    maximum=3600,
-)
+# Worker ตรวจสอบเวลาทุก 5 วินาที
+PROCESS_CHECK_INTERVAL = 5
 
-RTSP_CAPTURE_ENABLED = _get_env_bool(
-    "RTSP_CAPTURE_ENABLED",
-    default=True,
-)
+# เปิดใช้งานการจับภาพตามเวลา
+RTSP_CAPTURE_ENABLED = True
 
-RTSP_CAPTURE_MINUTES = (
-    _parse_capture_minutes(
-        os.getenv(
-            "RTSP_CAPTURE_MINUTES"
-        ),
-        default=[0],
-    )
-)
+# จับภาพทุก ๆ 0 และ 30 นาทีของชั่วโมง
+RTSP_CAPTURE_MINUTES = [0, 30]
 
 
 # =====================================================
