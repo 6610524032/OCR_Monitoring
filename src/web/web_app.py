@@ -1,3 +1,5 @@
+import copy
+import json
 import os
 import time
 from datetime import timedelta
@@ -68,11 +70,20 @@ LIVE_WARNING_INTERVAL_SECONDS = 60
 LIVE_PLACEHOLDER_WIDTH = 960
 LIVE_PLACEHOLDER_HEIGHT = 540
 
+WEB_GET_CACHE_MAX_ITEMS = 256
+WEB_GET_CACHE_MAX_AGE_SECONDS = 3600
+
 
 _live_warning_lock = Lock()
 _live_warning_times: dict[
     str,
     float,
+] = {}
+
+_web_get_cache_lock = Lock()
+_web_get_cache: dict[
+    tuple[str, str, str],
+    tuple[float, object],
 ] = {}
 
 
@@ -297,6 +308,244 @@ def logout():
     )
 
 
+
+def _normalize_cache_params(
+    params,
+) -> str:
+    if params is None:
+        return ""
+
+    if hasattr(
+        params,
+        "to_dict",
+    ):
+        try:
+            params = params.to_dict(
+                flat=False
+            )
+
+        except TypeError:
+            params = params.to_dict()
+
+    try:
+        return json.dumps(
+            params,
+            sort_keys=True,
+            separators=(
+                ",",
+                ":",
+            ),
+            ensure_ascii=True,
+            default=str,
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return repr(
+            params
+        )
+
+
+def _web_cache_key(
+    namespace: str,
+    api_path: str,
+    params,
+) -> tuple[str, str, str]:
+    return (
+        namespace,
+        str(
+            api_path
+        ),
+        _normalize_cache_params(
+            params
+        ),
+    )
+
+
+def _store_web_get_cache(
+    namespace: str,
+    api_path: str,
+    params,
+    value,
+) -> None:
+    key = _web_cache_key(
+        namespace,
+        api_path,
+        params,
+    )
+
+    stored_at = monotonic()
+
+    with _web_get_cache_lock:
+        if (
+            key not in _web_get_cache
+            and len(
+                _web_get_cache
+            ) >= WEB_GET_CACHE_MAX_ITEMS
+        ):
+            oldest_key = min(
+                _web_get_cache,
+                key=lambda current_key: (
+                    _web_get_cache[
+                        current_key
+                    ][0]
+                ),
+            )
+
+            _web_get_cache.pop(
+                oldest_key,
+                None,
+            )
+
+        _web_get_cache[
+            key
+        ] = (
+            stored_at,
+            copy.deepcopy(
+                value
+            ),
+        )
+
+
+def _load_web_get_cache(
+    namespace: str,
+    api_path: str,
+    params,
+):
+    key = _web_cache_key(
+        namespace,
+        api_path,
+        params,
+    )
+
+    current_time = monotonic()
+
+    with _web_get_cache_lock:
+        cached_item = (
+            _web_get_cache.get(
+                key
+            )
+        )
+
+        if cached_item is None:
+            return (
+                None,
+                None,
+            )
+
+        stored_at, value = (
+            cached_item
+        )
+
+        age_seconds = max(
+            0.0,
+            current_time - stored_at,
+        )
+
+        if (
+            age_seconds
+            > WEB_GET_CACHE_MAX_AGE_SECONDS
+        ):
+            _web_get_cache.pop(
+                key,
+                None,
+            )
+
+            return (
+                None,
+                None,
+            )
+
+        return (
+            copy.deepcopy(
+                value
+            ),
+            age_seconds,
+        )
+
+
+def _load_cached_json_response(
+    api_path,
+    params,
+    reason: str,
+):
+    cached_result, age_seconds = (
+        _load_web_get_cache(
+            "json",
+            api_path,
+            params,
+        )
+    )
+
+    if cached_result is None:
+        return None
+
+    logger.warning(
+        (
+            "Using cached Web API JSON: "
+            "path=%s, age_seconds=%.1f, "
+            "reason=%s"
+        ),
+        api_path,
+        age_seconds,
+        reason,
+    )
+
+    return cached_result
+
+
+def _load_cached_proxy_response(
+    api_path,
+    params,
+    reason: str,
+):
+    cached_result, age_seconds = (
+        _load_web_get_cache(
+            "proxy",
+            api_path,
+            params,
+        )
+    )
+
+    if cached_result is None:
+        return None
+
+    response_content, status_code, content_type = (
+        cached_result
+    )
+
+    logger.warning(
+        (
+            "Using cached Web API proxy "
+            "response: path=%s, "
+            "age_seconds=%.1f, reason=%s"
+        ),
+        api_path,
+        age_seconds,
+        reason,
+    )
+
+    return (
+        response_content,
+        status_code,
+        {
+            "Content-Type": (
+                content_type
+            ),
+            "Cache-Control": (
+                "no-store"
+            ),
+            "X-Data-Source": (
+                "fallback-cache"
+            ),
+            "X-Cache-Age-Seconds": (
+                f"{age_seconds:.1f}"
+            ),
+        },
+    )
+
 def get_api_json(
     api_path,
     params=None,
@@ -337,7 +586,86 @@ def get_api_json(
                 )
             )
 
+        if result.get(
+            "ok"
+        ) is not False:
+            _store_web_get_cache(
+                "json",
+                api_path,
+                params,
+                result,
+            )
+
         return result
+
+    except requests.HTTPError:
+        status_code = (
+            response.status_code
+            if response is not None
+            else None
+        )
+
+        if (
+            status_code is not None
+            and status_code >= 500
+        ):
+            cached_result = (
+                _load_cached_json_response(
+                    api_path,
+                    params,
+                    f"HTTP {status_code}",
+                )
+            )
+
+            if cached_result is not None:
+                return cached_result
+
+        raise
+
+    except requests.Timeout:
+        cached_result = (
+            _load_cached_json_response(
+                api_path,
+                params,
+                "timeout",
+            )
+        )
+
+        if cached_result is not None:
+            return cached_result
+
+        raise
+
+    except requests.RequestException:
+        cached_result = (
+            _load_cached_json_response(
+                api_path,
+                params,
+                "connection error",
+            )
+        )
+
+        if cached_result is not None:
+            return cached_result
+
+        raise
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        cached_result = (
+            _load_cached_json_response(
+                api_path,
+                params,
+                "invalid response",
+            )
+        )
+
+        if cached_result is not None:
+            return cached_result
+
+        raise
 
     finally:
         if response is not None:
@@ -1103,6 +1431,22 @@ def web_api_proxy(
                 status_code,
             )
 
+        if (
+            request.method == "GET"
+            and not is_log_viewer_request
+            and 200 <= status_code < 300
+        ):
+            _store_web_get_cache(
+                "proxy",
+                api_path,
+                request.args,
+                (
+                    response_content,
+                    status_code,
+                    content_type,
+                ),
+            )
+
         if status_code >= 500:
             logger.warning(
                 (
@@ -1116,6 +1460,21 @@ def web_api_proxy(
                 status_code,
             )
 
+            if (
+                request.method == "GET"
+                and not is_log_viewer_request
+            ):
+                cached_response = (
+                    _load_cached_proxy_response(
+                        api_path,
+                        request.args,
+                        f"HTTP {status_code}",
+                    )
+                )
+
+                if cached_response is not None:
+                    return cached_response
+
         return (
             response_content,
             status_code,
@@ -1123,10 +1482,31 @@ def web_api_proxy(
                 "Content-Type": (
                     content_type
                 ),
+                "Cache-Control": (
+                    "no-store"
+                ),
+                "X-Data-Source": (
+                    "live-api"
+                ),
             },
         )
 
     except requests.Timeout:
+        if (
+            request.method == "GET"
+            and not is_log_viewer_request
+        ):
+            cached_response = (
+                _load_cached_proxy_response(
+                    api_path,
+                    request.args,
+                    "timeout",
+                )
+            )
+
+            if cached_response is not None:
+                return cached_response
+
         logger.warning(
             (
                 "API proxy timeout "
@@ -1144,6 +1524,21 @@ def web_api_proxy(
         }), 504
 
     except requests.RequestException as error:
+        if (
+            request.method == "GET"
+            and not is_log_viewer_request
+        ):
+            cached_response = (
+                _load_cached_proxy_response(
+                    api_path,
+                    request.args,
+                    "connection error",
+                )
+            )
+
+            if cached_response is not None:
+                return cached_response
+
         logger.warning(
             (
                 "Cannot connect to API "
